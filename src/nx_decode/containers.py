@@ -1,10 +1,13 @@
 """PFS0 / HFS0 partition filesystems, and the XCI and NSP containers built on them.
 
-* PFS0 and HFS0. Reference: hactool ``pfs0.h``/``hfs0.h``, libnintendo-hac
-  ``pfs.h``. Intended spec (not yet cross-checked): https://switchbrew.org/wiki/NCA#PFS0 and
-  https://switchbrew.org/wiki/XCI#Hash_File_System_.28HFS0.29.
-* XCI (gamecard image). Reference: hactool ``xci.h``/``xci.c``, libnintendo-hac
-  ``gc.h``. Intended spec (not yet cross-checked): https://switchbrew.org/wiki/XCI.
+* PFS0 and HFS0. Spec: https://switchbrew.org/wiki/NCA (PartitionFS, 0x18-byte
+  entries) and https://switchbrew.org/wiki/XCI (HFS0, 0x40-byte entries with
+  hashed size and SHA-256). Reference: hactool ``pfs0.h``/``hfs0.h``,
+  libnintendo-hac ``pfs.h``.
+* XCI (gamecard image). Spec: https://switchbrew.org/wiki/XCI (CardHeader fields;
+  the 0x1000-byte CardKeyArea that precedes the header on the card and is hidden
+  from raw reads). Reference: hactool ``xci.h``/``xci.c``, libnintendo-hac ``gc.h``
+  (PartitionFsHeaderAddress is relative to the CardHeader; the wiki does not say).
 * NSP is a plain PFS0 holding NCAs, tickets and certificates.
 
 Compressed variants (NSZ/XCZ, NCZ entries) are detected and reported, not decoded.
@@ -101,8 +104,7 @@ class PartitionFS:
 class XciHeader:
     """The gamecard header fields nx-decode needs.
 
-    Reference: hactool, libnintendo-hac. Intended spec (not yet cross-checked):
-    https://switchbrew.org/wiki/XCI#CardHeader.
+    Spec: https://switchbrew.org/wiki/XCI#CardHeader.
     """
 
     base: int  # 0, or 0x1000 if the dump starts with the key area

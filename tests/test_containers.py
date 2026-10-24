@@ -57,6 +57,16 @@ def test_xci(key_area: bool) -> None:
         assert f.storage.read_at(0, f.size) == data
 
 
+def test_xci_full_card_layout() -> None:
+    # Switchbrew XCI: CardKeyArea at 0x0 (0x1000), CardHeader at 0x1000, HFS0 at 0x10000.
+    image = build_xci({"secure": sample_files()}, key_area=True)
+    assert image[0x1100:0x1104] == b"HEAD" and image[0x10000:0x10004] == b"HFS0"
+    c = open_container(MemoryStorage(image), "game.xci")
+    assert c.xci_header is not None and c.xci_header.base == 0x1000
+    assert c.root is not None and c.root.storage.read_at(0, 4) == b"HFS0"
+    assert len(c.content_files()) == len(sample_files())
+
+
 def test_rejects_garbage_and_truncation() -> None:
     with pytest.raises(FormatError):
         open_container(MemoryStorage(os.urandom(0x400)), "x.bin")

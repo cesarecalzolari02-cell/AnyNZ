@@ -3,12 +3,11 @@
 * ECB: key derivation, key-area and title-key unwrapping.
 * XTS: NCA headers and XTS sections. Nintendo's tweak is the sector number as a
   16-byte *big-endian* integer (standard XTS uses little-endian).
+  Spec: https://switchbrew.org/wiki/NCA#Encryption (reversed-endian tweak).
   Reference: hactool ``aes.c`` ``get_tweak``, libnintendo-hac ``AesXtsMakeTweak``.
 * CTR: NCA sections. The 16-byte counter is 8 bytes derived from the section
   header followed by ``(absolute NCA offset >> 4)`` as a big-endian u64.
-  Reference: hactool, libnintendo-hac.
-
-Intended spec (not yet cross-checked): https://switchbrew.org/wiki/NCA#Encryption.
+  Reference: hactool, libnintendo-hac (Switchbrew does not describe the counter).
 """
 
 from __future__ import annotations

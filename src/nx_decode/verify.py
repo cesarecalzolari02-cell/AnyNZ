@@ -8,9 +8,11 @@
 * Section hash layers: HierarchicalSha256 (partial last block hashed as-is) and
   IVFC (blocks zero-padded), as in hactool ``nca_section_check_hash_table``.
 
-Reference: hactool, libnintendo-hac. Intended spec (not yet cross-checked):
-https://switchbrew.org/wiki/XCI, https://switchbrew.org/wiki/NCA,
-https://switchbrew.org/wiki/CNMT.
+Spec: https://switchbrew.org/wiki/XCI (PartitionFsHeaderHash, HFS0 entry hashes),
+https://switchbrew.org/wiki/NCA (FS header hashes at 0x280, hash data layouts),
+https://switchbrew.org/wiki/CNMT (record hash is the SHA-256 of the content).
+Reference: hactool, libnintendo-hac (content ID = first 16 bytes of that hash, and
+the hash-table padding rules; the wiki does not state these).
 
 Every check yields a :class:`Check`; ``ok=None`` means skipped (unsupported or
 ``quick`` mode), never failed.

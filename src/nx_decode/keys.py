@@ -6,8 +6,8 @@ case-insensitive, indexed names use two lowercase hex digits (``master_key_0a``)
 Pre-derived keys (``header_key``, ``key_area_key_{application,ocean,system}_XX``,
 ``titlekek_XX``) are used when present. Otherwise they are derived from
 ``master_key_XX`` and the ``*_source`` seeds.
-Reference: hactool ``pki.c`` ``pki_derive_keys``/``generate_kek``.
-Intended spec (not yet cross-checked): https://switchbrew.org/wiki/Cryptosystem#Key_Derivation.
+Reference: hactool ``pki.c`` ``pki_derive_keys``/``generate_kek``. Switchbrew's
+Cryptosystem, SPL services and SMC pages do not describe this derivation chain.
 
 Key values never leave this module except as raw ``bytes`` handed to the
 crypto layer; nothing here formats a value into a string.
