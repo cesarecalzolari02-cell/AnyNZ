@@ -9,7 +9,7 @@ patches or signs anything.
 - [x] **Phase 1: keys + containers.** Scaffold (pyproject, MIT, .gitignore,
   pre-commit hook, CI, forbidden-file check), `keys`, `io`, `crypto`,
   `containers` (PFS0/HFS0/XCI/NSP, NSZ/XCZ detection), `list` / `extract`.
-- [ ] **Phase 2: NCA.** Header decryption (AES-128-XTS, big-endian sector
+- [x] **Phase 2: NCA.** Header decryption (AES-128-XTS, big-endian sector
   tweak, NCA2 variant), key generation and key-area key, tickets / title keys
   (common only), section readers (none / CTR / XTS).
 - [ ] **Phase 3: extraction + info/verify.** ExeFS/PFS0 and RomFS (IVFC) extraction,
