@@ -16,6 +16,11 @@ patches or signs anything.
   CNMT/NACP, `info`, `nca-extract`, `verify`.
 - [x] **Phase 4: polish.** README, `scripts/smoke.py`, CLI help, last checks,
   private GitHub repo.
+- [x] **Phase 5a: title grouping and DLC.** CNMT extended headers (ApplicationId,
+  PatchId) and content meta records, `titles` command (base, highest update, DLC;
+  warnings for missing bases, several update versions, duplicates), DLC through
+  the common-ticket path, synthetic base/patch/DLC tests. Patch (BKTR) decryption
+  and personalized tickets stay unsupported.
 
 Each phase ends with `ruff check`, `ruff format --check`, `pytest` and a commit.
 

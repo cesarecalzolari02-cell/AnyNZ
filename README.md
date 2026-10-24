@@ -56,16 +56,27 @@ nx-decode nca-extract game.nsp -o out/ --nca 0123...cdef.nca --section 1
 nx-decode nca-extract program.nca -o out/ --ticket 0100...0b.tik
 nx-decode verify  game.nsp                 # content IDs, CNMT hashes, hash tables
 nx-decode verify  game.xci --quick         # header-level checks only (fast)
+nx-decode titles  games/ updates/ dlc.nsp  # group files into base + latest update + DLC
 ```
 
-`info`, `verify`, `list` (for an `.nca`) and `nca-extract` accept `--keys PATH`.
+`info`, `verify`, `list` (for an `.nca`), `nca-extract` and `titles` accept `--keys PATH`.
 Exit status is 0 on success and 1 if something failed or could not be decoded
 (each problem is reported on its own line). `--debug` shows tracebacks for
 unexpected errors.
 
 `nca-extract` writes, per NCA, `section<N>_exefs/` (a PFS0 with `main.npdm`),
 `section<N>_pfs0/` (other PFS0 sections, such as the CNMT or logo) and
-`section<N>_romfs/` (the RomFS directory tree).
+`section<N>_romfs/` (the RomFS directory tree). DLC data NCAs extract like any
+other RomFS section.
+
+`titles` takes any mix of files and folders (searched recursively for
+`.xci`/`.nsp`/`.nca`), reads every content set's CNMT and groups them by the
+CNMT's ApplicationId (the title-ID convention is only a fallback when a CNMT has
+none). For each title it prints the base, the highest update found and the DLC,
+then lists system updates separately. It warns about DLC or updates without
+their base, several update versions, duplicate content, and CNMTs whose
+ApplicationId disagrees with their title ID. Warnings keep exit status 0;
+unreadable or compressed files are errors (exit status 1).
 
 All reads are streamed in 1 MiB chunks, so multi-gigabyte XCIs are never loaded
 into memory.
@@ -80,14 +91,17 @@ into memory.
 | NCA keys | key generations 0x00 to 0x1F, application/ocean/system key-area keys, rights-ID NCAs via **common** tickets |
 | Section crypto | none, AES-CTR, AES-XTS |
 | Hash layers | HierarchicalSha256 (PFS0), HierarchicalIntegrity / IVFC (RomFS) |
-| Metadata | CNMT (title ID, version, type, content records), NACP (name, publisher, display version) |
+| Metadata | CNMT (title ID, version, type, content records, ApplicationId / PatchId from the extended header, system-update content meta records), NACP (name, publisher, display version) |
+| Content meta types | Application, Patch and AddOnContent are grouped into titles; Delta, DataPatch and SystemUpdate are listed only |
+| DLC (AddOnContent) | `info`, `verify` and `nca-extract` via common tickets, like any RomFS |
+| Updates (Patch) | listed and grouped by `titles` and `info`; their BKTR sections are **not** decrypted (see below) |
 | Verify | content ID = SHA-256[:16], CNMT hash and size, FS-header hashes, master hashes, full hash tables, XCI root/partition HFS0 hashes |
 
 ## Not supported (reported clearly, never a crash)
 
 | Feature | What you get |
 | --- | --- |
-| Update / patch NCAs (BKTR, AesCtrEx, indirect storage) | "BKTR patch section: needs the base game, not supported" |
+| Update / patch NCA decryption (BKTR, AesCtrEx, indirect storage) | "BKTR patch section: needs the base game, not supported" (updates are still grouped by `titles`) |
 | Personalized tickets | "personalized ticket: only common tickets are supported" |
 | Keys for a newer key generation than your keys file has | `missing key: ...` naming the key and the key generation |
 | NSZ / XCZ / NCZ (compressed) | "compressed; decompress first" |
@@ -106,7 +120,9 @@ read-only. All code here is original.
 They were then checked against the [Switchbrew wiki](https://switchbrew.org/wiki/)
 pages for [XCI](https://switchbrew.org/wiki/XCI), [NCA](https://switchbrew.org/wiki/NCA)
 (header, FS header, section and hash types, PartitionFS),
-[Ticket](https://switchbrew.org/wiki/Ticket), [CNMT](https://switchbrew.org/wiki/CNMT),
+[Ticket](https://switchbrew.org/wiki/Ticket), [CNMT](https://switchbrew.org/wiki/CNMT)
+(incl. the Application, Patch, AddOnContent, Delta and SystemUpdate extended headers
+and content meta records),
 [NCM services](https://switchbrew.org/wiki/NCM_services) (content meta and content
 type enums) and [NACP](https://switchbrew.org/wiki/NACP). Module docstrings say
 `Spec:` for what was checked against the wiki and `Reference:` for what relies on
@@ -120,7 +136,11 @@ alone:
 - key derivation (`header_key`, key-area keys, `titlekek`, title-key unwrapping);
 - the IVFC level count convention, NCA content ID = first 16 bytes of the
   SHA-256, and whether the XCI `PartitionFsHeaderAddress` counts from the card
-  header.
+  header;
+- the CNMT file order (extended header, then content records, then content meta
+  records; the wiki lists the structures but does not say how they are laid out);
+- the title-ID convention (update = base + 0x800, DLC = base + 0x1000 + n), which
+  `titles` only uses when a CNMT has no ApplicationId.
 
 The three details that were previously unconfirmed:
 
