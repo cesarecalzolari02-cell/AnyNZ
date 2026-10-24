@@ -390,15 +390,34 @@ def build_nacp(name: str, publisher: str, display_version: str = "1.0.0", lang: 
     return bytes(nacp)
 
 
+def cnmt_ext(meta_type: int, application_id: int = 0, patch_id: int = 0) -> bytes:
+    """The extended header for ``meta_type``, laid out as on Switchbrew's CNMT page."""
+    if meta_type == 0x80:  # Application: PatchId, RequiredSystemVersion, RequiredAppVersion
+        return struct.pack("<QII", patch_id, 0, 0)
+    if meta_type == 0x81:  # Patch: ApplicationId, RequiredSystemVersion, ExtendedDataSize
+        return struct.pack("<QII8x", application_id, 0, 0)
+    if meta_type == 0x82:  # AddOnContent: ApplicationId, RequiredAppVersion, ..., DataPatchId
+        return struct.pack("<QI4xQ", application_id, 0, 0)
+    if meta_type == 0x83:  # Delta: ApplicationId, ExtendedDataSize
+        return struct.pack("<QI4x", application_id, 0)
+    if meta_type == 0x03:  # SystemUpdate: ExtendedDataSize
+        return struct.pack("<I", 0)
+    return b""
+
+
 def build_cnmt(
     title_id: int,
     version: int,
     meta_type: int,
     contents: list[tuple[bytes, int]],
     attributes: int = 0,
+    ext: bytes | None = None,
+    meta_infos: list[tuple[int, int, int]] | None = None,
 ) -> bytes:
-    """``contents`` is ``[(nca bytes, record content type)]``."""
-    ext = bytes(0x10)
+    """``contents`` is ``[(nca bytes, record content type)]``; ``meta_infos`` is
+    ``[(title ID, version, meta type)]``. ``ext`` defaults to 0x10 zero bytes."""
+    ext = bytes(0x10) if ext is None else ext
+    metas = meta_infos or []
     hdr = struct.pack(
         "<QIBBHHHBBBBI4x",
         title_id,
@@ -407,7 +426,7 @@ def build_cnmt(
         0,
         len(ext),
         len(contents),
-        0,
+        len(metas),
         0,
         0,
         0,
@@ -420,7 +439,10 @@ def build_cnmt(
         size = len(blob)
         lo, hi = size & 0xFFFFFFFF, size >> 32
         recs += digest + digest[:16] + struct.pack("<IBBBB", lo, hi, attributes, ctype, 0)
-    return hdr + ext + recs
+    for tid, ver, mtype in metas:
+        recs += struct.pack("<QIBB2x", tid, ver, mtype, 0)
+    body = hdr + ext + recs
+    return body + hashlib.sha256(body).digest()  # trailing digest, as in real CNMTs
 
 
 def nca_name(blob: bytes, meta: bool = False) -> str:

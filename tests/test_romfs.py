@@ -3,7 +3,15 @@ from __future__ import annotations
 import os
 
 import pytest
-from builders import SectionSpec, build_cnmt, build_nacp, build_nca, build_romfs, make_keys
+from builders import (
+    SectionSpec,
+    build_cnmt,
+    build_nacp,
+    build_nca,
+    build_romfs,
+    cnmt_ext,
+    make_keys,
+)
 
 from nx_decode.errors import FormatError
 from nx_decode.io import MemoryStorage
@@ -69,6 +77,48 @@ def test_nacp_and_cnmt() -> None:
     assert cnmt.type_name == "Patch" and cnmt.version == 0x10000
     assert [r.size for r in cnmt.contents] == [0x400, 0x10000]
     assert [r.type_name for r in cnmt.contents] == ["Program", "Control"]
+
+
+BASE = 0x0100000000001000
+
+
+@pytest.mark.parametrize(
+    ("meta_type", "title_id", "application_id", "patch_id"),
+    [
+        (0x80, BASE, BASE, BASE + 0x800),  # Application: own ID, PatchId in the ext header
+        (0x81, BASE + 0x800, BASE, None),  # Patch
+        (0x82, BASE + 0x1001, BASE, None),  # AddOnContent
+        (0x83, BASE + 0x800, BASE, None),  # Delta
+    ],
+)
+def test_cnmt_extended_header(
+    meta_type: int, title_id: int, application_id: int, patch_id: int | None
+) -> None:
+    ext = cnmt_ext(meta_type, application_id=application_id, patch_id=BASE + 0x800)
+    blob = os.urandom(0x200)
+    cnmt = parse_cnmt(build_cnmt(title_id, 0x10000, meta_type, [(blob, 1)], ext=ext))
+    assert (cnmt.application_id, cnmt.patch_id) == (application_id, patch_id)
+    assert cnmt.contents[0].size == 0x200
+
+
+def test_cnmt_application_id_needs_extended_header() -> None:
+    # An AddOnContent CNMT whose ext header is too short has no ApplicationId.
+    cnmt = parse_cnmt(build_cnmt(BASE + 0x1001, 0, 0x82, [], ext=b""))
+    assert cnmt.application_id is None
+
+
+def test_cnmt_system_update_meta_infos() -> None:
+    infos = [(0x0100000000000809, 0x1000, 0x02), (0x0100000000000006, 0x2000, 0x01)]
+    cnmt = parse_cnmt(
+        build_cnmt(0x0100000000000816, 0x3000, 0x03, [], ext=cnmt_ext(0x03), meta_infos=infos)
+    )
+    assert cnmt.type_name == "SystemUpdate" and cnmt.application_id is None
+    assert [(m.title_id, m.version, m.type_name) for m in cnmt.meta_infos] == [
+        (0x0100000000000809, 0x1000, "SystemData"),
+        (0x0100000000000006, 0x2000, "SystemProgram"),
+    ]
+    with pytest.raises(FormatError, match="truncated"):
+        parse_cnmt(build_cnmt(0x0100000000000816, 0, 0x03, [], meta_infos=infos)[:0x30])
 
 
 def test_cnmt_size_ignores_content_attributes() -> None:
