@@ -122,6 +122,10 @@ def print_info(report: TitleReport, name: str) -> None:
         print(f"Title ID: {m.title_id:016x}")
         print(f"Type:     {m.type_name}")
         print(f"Version:  v{m.version}")
+        if m.application_id is not None and m.application_id != m.title_id:
+            print(f"Base title: {m.application_id:016x}")
+        for info in m.meta_infos:
+            print(f"Contains: {info.title_id:016x} v{info.version} ({info.type_name})")
         nacp = report.nacp_for(m.title_id)
         if nacp:
             title, publisher = nacp.preferred()

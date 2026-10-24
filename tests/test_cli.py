@@ -5,8 +5,10 @@ import os
 import pytest
 from builders import (
     SectionSpec,
+    build_dlc,
     build_game,
     build_nca,
+    build_patch,
     build_pfs0,
     build_xci,
     make_keys,
@@ -155,6 +157,42 @@ def test_verify_xci_and_quick(tmp_path, capsys) -> None:
     assert "OK   XCI: root HFS0 header hash" in out and "skipped (--quick)" in out
     assert main(["info", "--keys", str(keys), str(xci)]) == 0
     assert "Test Game" in capsys.readouterr().out
+
+
+def test_dlc_info_and_extract(tmp_path, capsys) -> None:
+    game = build_game()
+    dlc = build_dlc(game.keys, game.title_id, index=2)
+    nsp = tmp_path / "dlc.nsp"
+    nsp.write_bytes(build_pfs0(dlc.files))
+    keys = write_keys_file(tmp_path / "k.keys", game.keys)
+
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 0
+    out = capsys.readouterr().out
+    assert f"Title ID: {dlc.title_id:016x}" in out and "Type:     AddOnContent" in out
+    assert f"Base title: {game.title_id:016x}" in out
+    assert "type Data" in out and out.count("decrypts with your keys: yes") == 2
+    assert "Tickets:  1 (common)" in out
+
+    dest = tmp_path / "out"
+    assert main(["nca-extract", "--keys", str(keys), str(nsp), "-o", str(dest)]) == 0
+    data_nca = dlc.files[0][0].split(".")[0]
+    romfs = dest / data_nca / "section0_romfs"
+    assert dlc.romfs_tree is not None
+    assert (romfs / "dlc" / "item2.bin").read_bytes() == dlc.romfs_tree["dlc"]["item2.bin"]
+    assert (romfs / "info.txt").read_bytes() == b"dlc\n"
+
+
+def test_patch_nsp_info_keeps_bktr_unsupported(tmp_path, capsys) -> None:
+    game = build_game()
+    patch = build_patch(game.keys, game.title_id, version=0x20000)
+    nsp = tmp_path / "update.nsp"
+    nsp.write_bytes(build_pfs0(patch.files))
+    keys = write_keys_file(tmp_path / "k.keys", game.keys)
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 0
+    out = capsys.readouterr().out
+    assert "Type:     Patch" in out and "Version:  v131072" in out
+    assert f"Base title: {game.title_id:016x}" in out
+    assert "BKTR patch section" in out and "needs the base game" in out
 
 
 def test_patch_nca_is_reported(tmp_path, capsys) -> None:

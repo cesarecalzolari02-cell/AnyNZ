@@ -493,14 +493,9 @@ def build_game(
     control = build_nca(
         keys, [SectionSpec("romfs", build_romfs({"control.nacp": nacp}))], content_type=2, **kw
     )
-    cnmt = build_cnmt(title_id, 0, 0x80, [(program, 1), (control, 3)])
-    meta = build_nca(
-        keys,
-        [SectionSpec("pfs0", build_pfs0([(f"Application_{title_id:016x}.cnmt", cnmt)]))],
-        content_type=1,
-        key_generation=key_generation,
-        title_id=title_id,
-    )
+    contents = [(program, 1), (control, 3)]
+    ext = cnmt_ext(0x80, patch_id=title_id + 0x800)
+    meta = build_meta_nca(keys, title_id, 0, 0x80, contents, ext, key_generation)
     files = [
         (nca_name(program), program),
         (nca_name(control), control),
@@ -509,6 +504,104 @@ def build_game(
     if rights_id:
         assert rid is not None and title_key is not None
         tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key), personalized=personalized)
-        files.append((rid.hex() + ".tik", tik))
-        files.append((rid.hex() + ".cert", os.urandom(0x700)))
+        files += ticket_files(rid, tik)
     return FakeGame(keys, files, title_id, "Test Game", "Test Publisher", tree, exefs)
+
+
+META_NAMES = {0x80: "Application", 0x81: "Patch", 0x82: "AddOnContent", 0x83: "Delta"}
+
+
+def build_meta_nca(
+    keys: dict[str, bytes],
+    title_id: int,
+    version: int,
+    meta_type: int,
+    contents: list[tuple[bytes, int]],
+    ext: bytes,
+    key_generation: int,
+) -> bytes:
+    """A Meta NCA whose PFS0 holds ``<Type>_<title id>.cnmt``."""
+    cnmt = build_cnmt(title_id, version, meta_type, contents, ext=ext)
+    name = f"{META_NAMES.get(meta_type, 'Unknown')}_{title_id:016x}.cnmt"
+    return build_nca(
+        keys,
+        [SectionSpec("pfs0", build_pfs0([(name, cnmt)]))],
+        content_type=1,
+        key_generation=key_generation,
+        title_id=title_id,
+    )
+
+
+def ticket_files(rights_id: bytes, ticket: bytes) -> list[tuple[str, bytes]]:
+    return [(rights_id.hex() + ".tik", ticket), (rights_id.hex() + ".cert", os.urandom(0x700))]
+
+
+@dataclass
+class FakeContent:
+    """A patch or DLC content set: its NSP entries and what the tests expect back."""
+
+    files: list[tuple[str, bytes]]
+    title_id: int
+    version: int
+    application_id: int
+    romfs_tree: Tree | None = None
+
+
+def build_dlc(
+    keys: dict[str, bytes],
+    application_id: int,
+    index: int = 1,
+    version: int = 0,
+    key_generation: int = 3,
+    ext: bytes | None = None,
+    title_id: int | None = None,
+) -> FakeContent:
+    """AddOnContent: a rights-ID Data NCA (RomFS), a Meta NCA and a common ticket.
+
+    The title ID defaults to the usual ``(application ID + 0x1000) + index`` scheme;
+    pass ``title_id`` to break it (the CNMT's ApplicationId is what counts).
+    """
+    rev = max(key_generation - 1, 0)
+    tid = title_id if title_id is not None else application_id + 0x1000 + index
+    title_key, rid = rand_key(), make_rights_id(tid, rev)
+    tree: Tree = {"dlc": {f"item{index}.bin": os.urandom(0x1234)}, "info.txt": b"dlc\n"}
+    data = build_nca(
+        keys,
+        [SectionSpec("romfs", build_romfs(tree))],
+        content_type=4,
+        key_generation=key_generation,
+        title_id=tid,
+        rights_id=rid,
+        title_key=title_key,
+    )
+    ext = cnmt_ext(0x82, application_id=application_id) if ext is None else ext
+    meta = build_meta_nca(keys, tid, version, 0x82, [(data, 2)], ext, key_generation)
+    tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key))
+    files = [(nca_name(data), data), (nca_name(meta, meta=True), meta), *ticket_files(rid, tik)]
+    return FakeContent(files, tid, version, application_id, tree)
+
+
+def build_patch(
+    keys: dict[str, bytes], application_id: int, version: int = 0x10000, key_generation: int = 3
+) -> FakeContent:
+    """A Patch: a rights-ID Program NCA with a BKTR RomFS section, plus its Meta NCA."""
+    rev = max(key_generation - 1, 0)
+    tid = application_id + 0x800
+    title_key, rid = rand_key(), make_rights_id(tid, rev)
+    program = build_nca(
+        keys,
+        [
+            SectionSpec("pfs0", build_pfs0([("main", os.urandom(0x400))])),
+            SectionSpec("romfs", os.urandom(0x1000), patch=True),
+        ],
+        content_type=0,
+        key_generation=key_generation,
+        title_id=tid,
+        rights_id=rid,
+        title_key=title_key,
+    )
+    ext = cnmt_ext(0x81, application_id=application_id)
+    meta = build_meta_nca(keys, tid, version, 0x81, [(program, 1)], ext, key_generation)
+    tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key))
+    files = [(nca_name(program), program), (nca_name(meta, meta=True), meta)]
+    return FakeContent(files + ticket_files(rid, tik), tid, version, application_id)
