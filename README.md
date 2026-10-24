@@ -168,10 +168,14 @@ else from your keys file when reporting issues.
 
 ## Development
 
+See [DEVELOPMENT.md](DEVELOPMENT.md) for setup on Windows and Linux/macOS, the
+module layout, conventions, and what still needs checking on real files.
+
 ```sh
 pip install -e ".[dev]"
 git config core.hooksPath .githooks   # enable the pre-commit safety hook
 ruff check . && ruff format --check . && pytest -q
+python scripts/demo.py                # every command on a synthetic library, no keys needed
 ```
 
 The test suite builds tiny synthetic PFS0/HFS0/XCI/NSP/NCA/RomFS/ticket files at

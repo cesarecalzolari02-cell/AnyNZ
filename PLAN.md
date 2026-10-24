@@ -21,6 +21,18 @@ patches or signs anything.
   warnings for missing bases, several update versions, duplicates), DLC through
   the common-ticket path, synthetic base/patch/DLC tests. Patch (BKTR) decryption
   and personalized tickets stay unsupported.
+- [x] **Dev setup for working without a console.** `DEVELOPMENT.md`,
+  `scripts/demo.py` (all commands on a synthetic library), CI on Windows too.
+
+Next (not started):
+
+- [ ] **Phase 5b: real-file validation.** Blocked until the owner has keys dumped
+  from their own console. Work through the checklist in `DEVELOPMENT.md`
+  ("Waiting for real files") with `scripts/smoke.py`; turn every surprise into a
+  synthetic regression test before fixing it.
+- [ ] **Later, owner's decision:** BKTR patch decryption (base + update RomFS) and
+  personalized tickets. Both are out of scope in `CLAUDE.md` today, which would
+  have to change first.
 
 Each phase ends with `ruff check`, `ruff format --check`, `pytest` and a commit.
 
