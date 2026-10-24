@@ -1,0 +1,34 @@
+# Keys and Nintendo data: never commit these.
+*.keys
+prod.keys
+title.keys
+dev.keys
+*.xci
+*.xcz
+*.nsp
+*.nsz
+*.nca
+*.ncz
+*.tik
+*.cert
+*.cnmt
+*.nacp
+
+# Output folders
+out/
+output/
+extracted/
+dump/
+dumps/
+smoke_out/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,10 @@
+# Optional: for users of the pre-commit framework (https://pre-commit.com).
+# The plain git hook in .githooks/ does the same check without extra tools.
+repos:
+  - repo: local
+    hooks:
+      - id: no-keys-or-containers
+        name: no keys or Switch containers
+        entry: python3 scripts/check_forbidden.py
+        language: system
+        types: [file]
