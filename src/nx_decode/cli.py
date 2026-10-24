@@ -1,4 +1,4 @@
-"""Command-line interface: ``nx-decode {info,list,extract,nca-extract,verify}``."""
+"""Command-line interface: ``nx-decode {info,list,extract,nca-extract,verify,titles}``."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from .containers import (
 from .errors import KeysError, NxError
 from .io import FileStorage, MemoryStorage, Storage, safe_join
 from .keys import Keyset
+from .library import Library, scan
 from .nca import DISTRIBUTION, ENC_NAMES, HASH_NAMES, Nca, Section
 from .romfs import RomFS
 from .title import TitleReport, inspect, load_tickets
@@ -257,6 +258,50 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return EXIT_ERROR if failed else EXIT_OK
 
 
+# ----------------------------------------------------------------------------- titles
+
+
+def print_library(lib: Library) -> None:
+    for aid in sorted(lib.titles):
+        g = lib.titles[aid]
+        print(f"{aid:016x}  {g.name or '(name unknown: no Control NCA found)'}")
+        for s in g.base:
+            print(f"  base:    v{s.cnmt.version:<10} {s.source}")
+        if not g.base:
+            print("  base:    (not found)")
+        if latest := g.latest_update:
+            extra = f" (highest of {len(g.updates)})" if len(g.updates) > 1 else ""
+            print(f"  update:  v{latest.cnmt.version:<10} {latest.source}{extra}")
+        for s in sorted(g.dlc, key=lambda s: (s.cnmt.title_id, s.cnmt.version)):
+            print(f"  DLC:     {s.cnmt.title_id:016x} v{s.cnmt.version:<6} {s.source}")
+        for s in g.other:
+            print(f"  {s.cnmt.type_name}: {s.cnmt.title_id:016x} v{s.cnmt.version} {s.source}")
+        for w in g.warnings:
+            print(f"  warning: {w}")
+    if lib.ungrouped:
+        print("Not part of a title:")
+        for s in lib.ungrouped:
+            print(f"  {s.label()}  {s.source}")
+            for info in s.cnmt.meta_infos:
+                print(f"      contains {info.title_id:016x} v{info.version} ({info.type_name})")
+    for e in lib.errors:
+        print(f"error: {e}")
+    updates = sum(1 for g in lib.titles.values() if g.updates)
+    dlc = sum(len({s.cnmt.title_id for s in g.dlc}) for g in lib.titles.values())
+    warnings = sum(len(g.warnings) for g in lib.titles.values())
+    print(
+        f"{len(lib.titles)} title(s), {updates} with updates, {dlc} DLC, "
+        f"{warnings} warning(s), {len(lib.errors)} error(s)"
+    )
+
+
+def cmd_titles(args: argparse.Namespace) -> int:
+    keyset = load_keyset(args, required=True)
+    lib = scan(args.paths, keyset, open_input)
+    print_library(lib)
+    return EXIT_ERROR if lib.errors else EXIT_OK
+
+
 # ----------------------------------------------------------------------------- parser
 
 
@@ -308,6 +353,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("file")
     s.add_argument("--quick", action="store_true", help="skip full-data hashing")
     s.set_defaults(func=cmd_verify)
+
+    s = sub.add_parser(
+        "titles",
+        parents=[common],
+        help="group XCI/NSP/NCA files into titles: base, latest update, DLC",
+    )
+    s.add_argument(
+        "paths", nargs="+", metavar="PATH", help="files or folders (searched recursively)"
+    )
+    s.set_defaults(func=cmd_titles)
     return p
 
 

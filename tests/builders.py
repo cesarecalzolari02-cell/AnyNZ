@@ -519,9 +519,10 @@ def build_meta_nca(
     contents: list[tuple[bytes, int]],
     ext: bytes,
     key_generation: int,
+    meta_infos: list[tuple[int, int, int]] | None = None,
 ) -> bytes:
     """A Meta NCA whose PFS0 holds ``<Type>_<title id>.cnmt``."""
-    cnmt = build_cnmt(title_id, version, meta_type, contents, ext=ext)
+    cnmt = build_cnmt(title_id, version, meta_type, contents, ext=ext, meta_infos=meta_infos)
     name = f"{META_NAMES.get(meta_type, 'Unknown')}_{title_id:016x}.cnmt"
     return build_nca(
         keys,
