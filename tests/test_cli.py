@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import os
 
-from builders import build_pfs0, build_xci
+import pytest
+from builders import (
+    SectionSpec,
+    build_game,
+    build_nca,
+    build_pfs0,
+    build_xci,
+    make_keys,
+    write_keys_file,
+)
 
 from nx_decode.cli import main
 
@@ -42,3 +51,129 @@ def test_errors_are_reported_not_raised(tmp_path, capsys) -> None:
     nsz.write_bytes(build_pfs0([("a", b"a")]))
     assert main(["list", str(nsz)]) == 1
     assert "compressed" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ decrypting commands
+
+
+def game_nsp(tmp_path, **kw):
+    game = build_game(**kw)
+    nsp = tmp_path / "game.nsp"
+    nsp.write_bytes(build_pfs0(game.files))
+    keys = write_keys_file(tmp_path / "test.keys", game.keys)
+    return game, nsp, keys
+
+
+@pytest.mark.parametrize("rights_id", [False, True])
+def test_info(tmp_path, capsys, rights_id: bool) -> None:
+    game, nsp, keys = game_nsp(tmp_path, rights_id=rights_id)
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 0
+    out = capsys.readouterr().out
+    assert f"Title ID: {game.title_id:016x}" in out
+    assert "Name:     Test Game" in out and "Publisher: Test Publisher" in out
+    assert "Type:     Application" in out and "Display version: 1.2.3" in out
+    assert out.count("decrypts with your keys: yes") == 3
+    for value in game.keys.values():
+        assert value.hex() not in out.lower()
+
+
+def test_info_without_keys_or_with_personalized_ticket(tmp_path, capsys, monkeypatch) -> None:
+    monkeypatch.delenv("SWITCH_KEYS", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))
+    _, nsp, _ = game_nsp(tmp_path)
+    assert main(["info", str(nsp)]) == 1
+    captured = capsys.readouterr()
+    assert "keys file not found" in captured.err
+    assert "missing key: header_key" in captured.out
+
+    _, nsp, keys = game_nsp(tmp_path, rights_id=True, personalized=True)
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 1
+    assert "personalized ticket" in capsys.readouterr().out
+
+
+def test_info_reports_unknown_key_generation(tmp_path, capsys) -> None:
+    game, nsp, _ = game_nsp(tmp_path, key_generation=20)
+    keys = write_keys_file(tmp_path / "old.keys", {"header_key": game.keys["header_key"]})
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 1
+    out = capsys.readouterr().out
+    assert "missing key: key_area_key_application_13" in out
+    assert "key generation 20" in out
+
+
+def test_nca_extract_container(tmp_path, capsys) -> None:
+    game, nsp, keys = game_nsp(tmp_path, rights_id=True)
+    out = tmp_path / "out"
+    assert main(["nca-extract", "--keys", str(keys), str(nsp), "-o", str(out)]) == 0
+    program = game.files[0][0].split(".")[0]
+    for name, data in game.exefs_files:
+        assert (out / program / "section0_exefs" / name).read_bytes() == data
+    assert (out / program / "section1_romfs" / "data" / "sub" / "deep.txt").read_bytes() == b"hi\n"
+    meta = game.files[2][0].split(".")[0]
+    assert any((out / meta / "section0_pfs0").glob("*.cnmt"))
+
+
+def test_nca_extract_standalone_with_ticket(tmp_path) -> None:
+    game, _, keys = game_nsp(tmp_path, rights_id=True)
+    (tmp_path / "p.nca").write_bytes(game.files[0][1])
+    (tmp_path / "t.tik").write_bytes(game.files[3][1])
+    out = tmp_path / "out"
+    args = ["nca-extract", "--keys", str(keys), str(tmp_path / "p.nca"), "-o", str(out)]
+    assert main(args) == 1  # no ticket: reported, not crashed
+    assert main([*args, "--ticket", str(tmp_path / "t.tik"), "--section", "1"]) == 0
+    assert (out / "section1_romfs" / "readme.txt").exists()
+    assert not (out / "section0_exefs").exists()
+
+
+def test_list_standalone_nca(tmp_path, capsys) -> None:
+    game, _, keys = game_nsp(tmp_path)
+    (tmp_path / "p.nca").write_bytes(game.files[0][1])
+    assert main(["list", "--keys", str(keys), str(tmp_path / "p.nca")]) == 0
+    out = capsys.readouterr().out
+    assert "main.npdm" in out and "data/sub/deep.txt" in out
+
+
+def test_verify_ok_then_corrupted(tmp_path, capsys) -> None:
+    _, nsp, keys = game_nsp(tmp_path)
+    assert main(["verify", "--keys", str(keys), str(nsp)]) == 0
+    out = capsys.readouterr().out
+    assert "FAIL" not in out and "CNMT hash" in out and "content ID" in out
+
+    blob = bytearray(nsp.read_bytes())
+    blob[-0x10] ^= 0xFF  # last NCA (meta), inside its PFS0 data
+    nsp.write_bytes(bytes(blob))
+    assert main(["verify", "--keys", str(keys), str(nsp)]) == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_verify_xci_and_quick(tmp_path, capsys) -> None:
+    game = build_game()
+    xci = tmp_path / "game.xci"
+    xci.write_bytes(build_xci({"update": [], "normal": [], "secure": game.files}))
+    keys = write_keys_file(tmp_path / "k.keys", game.keys)
+    assert main(["verify", "--keys", str(keys), str(xci), "--quick"]) == 0
+    out = capsys.readouterr().out
+    assert "OK   XCI: root HFS0 header hash" in out and "skipped (--quick)" in out
+    assert main(["info", "--keys", str(keys), str(xci)]) == 0
+    assert "Test Game" in capsys.readouterr().out
+
+
+def test_patch_nca_is_reported(tmp_path, capsys) -> None:
+    keys = make_keys()
+    blob = build_nca(keys, [SectionSpec("romfs", os.urandom(0x800), patch=True)])
+    (tmp_path / "patch.nca").write_bytes(blob)
+    kf = write_keys_file(tmp_path / "k.keys", keys)
+    assert (
+        main(
+            [
+                "nca-extract",
+                "--keys",
+                str(kf),
+                str(tmp_path / "patch.nca"),
+                "-o",
+                str(tmp_path / "o"),
+            ]
+        )
+        == 1
+    )
+    assert "needs the base game" in capsys.readouterr().out
+    assert main(["info", "--keys", str(kf), str(tmp_path / "patch.nca")]) == 1

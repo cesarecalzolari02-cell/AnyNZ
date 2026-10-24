@@ -12,7 +12,7 @@ patches or signs anything.
 - [x] **Phase 2: NCA.** Header decryption (AES-128-XTS, big-endian sector
   tweak, NCA2 variant), key generation and key-area key, tickets / title keys
   (common only), section readers (none / CTR / XTS).
-- [ ] **Phase 3: extraction + info/verify.** ExeFS/PFS0 and RomFS (IVFC) extraction,
+- [x] **Phase 3: extraction + info/verify.** ExeFS/PFS0 and RomFS (IVFC) extraction,
   CNMT/NACP, `info`, `nca-extract`, `verify`.
 - [ ] **Phase 4: polish.** README, `scripts/smoke.py`, CLI help, last checks,
   private GitHub repo.

@@ -277,3 +277,189 @@ def build_ticket(
 
 def encrypt_title_key(keys: dict[str, bytes], rev: int, title_key: bytes) -> bytes:
     return _ecb_enc(keys[f"titlekek_{rev:02x}"], title_key)
+
+
+# ------------------------------------------------------------------ RomFS / CNMT / NACP
+
+Tree = dict  # name -> bytes (file) or Tree (directory)
+
+
+def build_romfs(tree: Tree) -> bytes:
+    """Build a RomFS image. Hash-bucket tables are present but unused (all empty)."""
+    dirs: list[dict] = []  # each: name, parent, children, files
+    files: list[dict] = []  # each: name, parent, data
+
+    def visit(name: str, node: Tree, parent: int) -> int:
+        idx = len(dirs)
+        dirs.append({"name": name, "parent": parent, "children": [], "files": []})
+        for child, value in node.items():
+            if isinstance(value, dict):
+                dirs[idx]["children"].append(visit(child, value, idx))
+            else:
+                files.append({"name": child, "parent": idx, "data": value})
+                dirs[idx]["files"].append(len(files) - 1)
+        return idx
+
+    visit("", tree, 0)
+
+    def entry_size(name: str, fixed: int) -> int:
+        return fixed + _align(len(name.encode()), 4)
+
+    dir_offs, off = [], 0
+    for d in dirs:
+        dir_offs.append(off)
+        off += entry_size(d["name"], 0x18)
+    file_offs, off = [], 0
+    for f in files:
+        file_offs.append(off)
+        off += entry_size(f["name"], 0x20)
+
+    data, data_offs = b"", []
+    for f in files:
+        data = data.ljust(_align(len(data), 0x10), b"\0")
+        data_offs.append(len(data))
+        data += f["data"]
+
+    none = 0xFFFFFFFF
+
+    def sibling(items: list[int], i: int, offs: list[int]) -> int:
+        pos = items.index(i)
+        return offs[items[pos + 1]] if pos + 1 < len(items) else none
+
+    dir_table = b""
+    for i, d in enumerate(dirs):
+        parent = dirs[d["parent"]]
+        sib = sibling(parent["children"], i, dir_offs) if i else none
+        child = dir_offs[d["children"][0]] if d["children"] else none
+        first = file_offs[d["files"][0]] if d["files"] else none
+        name = d["name"].encode()
+        dir_table += struct.pack("<6I", dir_offs[d["parent"]], sib, child, first, none, len(name))
+        dir_table += name.ljust(_align(len(name), 4), b"\0")
+    file_table = b""
+    for i, f in enumerate(files):
+        sib = sibling(dirs[f["parent"]]["files"], i, file_offs)
+        name = f["name"].encode()
+        file_table += struct.pack(
+            "<IIQQII", dir_offs[f["parent"]], sib, data_offs[i], len(f["data"]), none, len(name)
+        )
+        file_table += name.ljust(_align(len(name), 4), b"\0")
+
+    data_start = 0x200
+    tables_start = _align(data_start + len(data), 4)
+    dir_hash = struct.pack("<I", none)
+    file_hash = struct.pack("<I", none)
+    layout, cur = [], tables_start
+    for blob in (dir_hash, dir_table, file_hash, file_table):
+        layout.append((cur, len(blob)))
+        cur += len(blob)
+    header = struct.pack("<Q", 0x50) + b"".join(struct.pack("<QQ", o, s) for o, s in layout)
+    header += struct.pack("<Q", data_start)
+    image = header.ljust(data_start, b"\0") + data
+    image = image.ljust(tables_start, b"\0") + dir_hash + dir_table + file_hash + file_table
+    return image
+
+
+def build_nacp(name: str, publisher: str, display_version: str = "1.0.0", lang: int = 0) -> bytes:
+    nacp = bytearray(0x4000)
+    off = lang * 0x300
+    nacp[off : off + len(name.encode())] = name.encode()
+    nacp[off + 0x200 : off + 0x200 + len(publisher.encode())] = publisher.encode()
+    nacp[0x3060 : 0x3060 + len(display_version)] = display_version.encode()
+    return bytes(nacp)
+
+
+def build_cnmt(
+    title_id: int, version: int, meta_type: int, contents: list[tuple[bytes, int]]
+) -> bytes:
+    """``contents`` is ``[(nca bytes, record content type)]``."""
+    ext = bytes(0x10)
+    hdr = struct.pack(
+        "<QIBBHHHBBBBI4x",
+        title_id,
+        version,
+        meta_type,
+        0,
+        len(ext),
+        len(contents),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+    recs = b""
+    for blob, ctype in contents:
+        digest = hashlib.sha256(blob).digest()
+        size = len(blob)
+        recs += digest + digest[:16] + struct.pack("<IHBB", size & 0xFFFFFFFF, size >> 32, ctype, 0)
+    return hdr + ext + recs
+
+
+def nca_name(blob: bytes, meta: bool = False) -> str:
+    return hashlib.sha256(blob).hexdigest()[:32] + (".cnmt.nca" if meta else ".nca")
+
+
+@dataclass
+class FakeGame:
+    keys: dict[str, bytes]
+    files: list[tuple[str, bytes]]
+    title_id: int
+    name: str
+    publisher: str
+    romfs_tree: Tree
+    exefs_files: list[tuple[str, bytes]]
+
+
+def build_game(
+    title_id: int = 0x0100ABCD00010000,
+    key_generation: int = 3,
+    rights_id: bool = False,
+    personalized: bool = False,
+) -> FakeGame:
+    """A minimal application: Program (ExeFS + RomFS), Control (NACP) and Meta NCAs."""
+    rev = max(key_generation - 1, 0)
+    keys = make_keys(revisions=(rev,))
+    title_key = rand_key() if rights_id else None
+    rid = make_rights_id(title_id, rev) if rights_id else None
+    kw = {
+        "key_generation": key_generation,
+        "title_id": title_id,
+        "rights_id": rid,
+        "title_key": title_key,
+    }
+
+    exefs = [("main", os.urandom(0x1800)), ("main.npdm", os.urandom(0x200)), ("rtld", b"r" * 99)]
+    tree: Tree = {
+        "data": {"level1.bin": os.urandom(0x2100), "empty": b"", "sub": {"deep.txt": b"hi\n"}},
+        "readme.txt": b"synthetic test data\n",
+    }
+    program = build_nca(
+        keys,
+        [SectionSpec("pfs0", build_pfs0(exefs)), SectionSpec("romfs", build_romfs(tree))],
+        content_type=0,
+        **kw,
+    )
+    nacp = build_nacp("Test Game", "Test Publisher", "1.2.3")
+    control = build_nca(
+        keys, [SectionSpec("romfs", build_romfs({"control.nacp": nacp}))], content_type=2, **kw
+    )
+    cnmt = build_cnmt(title_id, 0, 0x80, [(program, 1), (control, 3)])
+    meta = build_nca(
+        keys,
+        [SectionSpec("pfs0", build_pfs0([(f"Application_{title_id:016x}.cnmt", cnmt)]))],
+        content_type=1,
+        key_generation=key_generation,
+        title_id=title_id,
+    )
+    files = [
+        (nca_name(program), program),
+        (nca_name(control), control),
+        (nca_name(meta, meta=True), meta),
+    ]
+    if rights_id:
+        assert rid is not None and title_key is not None
+        tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key), personalized=personalized)
+        files.append((rid.hex() + ".tik", tik))
+        files.append((rid.hex() + ".cert", os.urandom(0x700)))
+    return FakeGame(keys, files, title_id, "Test Game", "Test Publisher", tree, exefs)
