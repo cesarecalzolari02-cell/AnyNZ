@@ -1,20 +1,19 @@
 """eTicket parsing, just enough to unwrap common title keys.
 
-Reference: libnintendo-es ``ticket.h`` ``sTicketBody_v2``; signature block sizes
-from hactool/nstool.
-Intended spec (not yet cross-checked): https://switchbrew.org/wiki/Ticket.
+Spec: https://switchbrew.org/wiki/Ticket (signature types and sizes, body layout,
+title key types). Reference: libnintendo-es ``ticket.h`` ``sTicketBody_v2``.
 
-A ticket starts with a signature block whose size depends on the signature type,
-then the body:
+A ticket starts with a signature block (4-byte type, signature, padding to 0x40)
+whose size depends on the signature type, then the 0x180-byte body:
 
 ======  =====  =========================================
 Offset  Size   Field
 ======  =====  =========================================
 0x000   0x40   issuer
 0x040   0x100  title key block (common: first 0x10 bytes)
-0x140   1      format version
+0x140   1      format version (always 2)
 0x141   1      title key type (0 common, 1 personalized)
-0x145   1      common key ID
+0x145   1      master key revision
 0x160   0x10   rights ID
 ======  =====  =========================================
 
@@ -36,6 +35,7 @@ SIGNATURE_BODY_OFFSET = {
     0x010003: 0x240,  # RSA-4096 SHA-256
     0x010004: 0x140,  # RSA-2048 SHA-256
     0x010005: 0x80,  # ECDSA SHA-256
+    0x010006: 0x40,  # HMAC-SHA1-160
 }
 BODY_SIZE = 0x180
 
@@ -48,7 +48,7 @@ class Ticket:
     rights_id: bytes
     title_key_type: int
     title_key_block: bytes
-    common_key_id: int
+    master_key_revision: int
 
     @property
     def is_personalized(self) -> bool:
@@ -63,8 +63,8 @@ class Ticket:
 def body_offset(data: bytes) -> int:
     """Find where the body starts from the signature type.
 
-    The byte order of the type is not documented consistently (Switch tickets in
-    the wild start ``04 00 01 00``), so both orders are accepted.
+    Switchbrew does not state the byte order of the type (Switch tickets in the
+    wild start ``04 00 01 00``), so both orders are accepted.
     """
     if len(data) < 4:
         raise FormatError("ticket is too short")
@@ -84,5 +84,5 @@ def parse_ticket(data: bytes) -> Ticket:
         rights_id=body[0x160:0x170],
         title_key_type=body[0x141],
         title_key_block=body[0x40:0x140],
-        common_key_id=body[0x145],
+        master_key_revision=body[0x145],
     )

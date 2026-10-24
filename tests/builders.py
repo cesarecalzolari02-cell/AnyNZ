@@ -265,20 +265,36 @@ def make_rights_id(title_id: int, rev: int) -> bytes:
     return title_id.to_bytes(8, "big") + bytes(7) + bytes([rev])
 
 
+# signature type -> (signature size, padding size), from Switchbrew's Ticket page
+TICKET_SIGNATURES = {
+    0x010000: (0x200, 0x3C),
+    0x010001: (0x100, 0x3C),
+    0x010002: (0x3C, 0x40),
+    0x010003: (0x200, 0x3C),
+    0x010004: (0x100, 0x3C),
+    0x010005: (0x3C, 0x40),
+    0x010006: (0x14, 0x28),
+}
+
+
 def build_ticket(
     rights_id: bytes,
     enc_title_key: bytes,
     personalized: bool = False,
     big_endian_sig: bool = False,
+    sig_type: int = 0x010004,
+    master_key_revision: int = 0,
 ) -> bytes:
-    sig = (0x010004).to_bytes(4, "big" if big_endian_sig else "little")
+    sig_size, pad_size = TICKET_SIGNATURES[sig_type]
+    sig = sig_type.to_bytes(4, "big" if big_endian_sig else "little")
     body = bytearray(0x180)
     body[0:0x1A] = b"Root-CA00000003-XS00000020"
     body[0x40:0x50] = enc_title_key
     body[0x140] = 2
     body[0x141] = 1 if personalized else 0
+    body[0x145] = master_key_revision
     body[0x160:0x170] = rights_id
-    return sig + os.urandom(0x100) + b"\0" * 0x3C + bytes(body)
+    return sig + os.urandom(sig_size) + b"\0" * pad_size + bytes(body)
 
 
 def encrypt_title_key(keys: dict[str, bytes], rev: int, title_key: bytes) -> bytes:

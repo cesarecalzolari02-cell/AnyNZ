@@ -4,6 +4,7 @@ import os
 
 import pytest
 from builders import (
+    TICKET_SIGNATURES,
     SectionSpec,
     build_nca,
     build_pfs0,
@@ -153,6 +154,17 @@ def test_rights_id_common_ticket(big_endian_sig: bool) -> None:
     nca = open_nca(blob, keys, tickets={rid: tik})
     assert nca.header.has_rights_id
     assert nca.sections[0].check_master_hash()
+
+
+@pytest.mark.parametrize("sig_type", sorted(TICKET_SIGNATURES))
+@pytest.mark.parametrize("big_endian_sig", [False, True])
+def test_ticket_signature_types(sig_type: int, big_endian_sig: bool) -> None:
+    rid, tk = make_rights_id(0x0100000000001000, 3), rand_key()
+    blob = build_ticket(
+        rid, tk, sig_type=sig_type, big_endian_sig=big_endian_sig, master_key_revision=3
+    )
+    tik = parse_ticket(blob)
+    assert (tik.rights_id, tik.encrypted_title_key, tik.master_key_revision) == (rid, tk, 3)
 
 
 def test_rights_id_without_ticket_or_personalized() -> None:
