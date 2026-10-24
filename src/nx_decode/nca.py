@@ -1,8 +1,9 @@
 """NCA (Nintendo Content Archive): header decryption, key resolution, section access.
 
+Spec: https://switchbrew.org/wiki/NCA (header and FS header layouts, enum values,
+key generation, NCA2/NCA3 header sectors, HierarchicalSha256 and IVFC hash data).
 Reference: hactool ``nca.c``/``nca.h``, libnintendo-hac ``nca.h`` and
-``ContentArchiveUtil.cpp``.
-Intended spec (not yet cross-checked): https://switchbrew.org/wiki/NCA.
+``ContentArchiveUtil.cpp`` (IVFC level count, NCA0; the wiki does not cover these).
 
 Header (0xC00 bytes, AES-128-XTS with ``header_key``, 0x200-byte sectors, Nintendo
 big-endian tweak). NCA3 numbers the six sectors 0..5. NCA2 encrypts each FS header
@@ -25,8 +26,11 @@ Main header (offsets from 0x200):
 ======  =====  ==============================================
 
 FS header (one per section, 0x200 bytes): 0x2 format (0 RomFS, 1 PFS0), 0x3 hash
-type, 0x4 encryption type, 0x8 hash info, 0x100 patch info, 0x140 generation,
-0x144 secure value, 0x148 sparse info.
+type, 0x4 encryption type, 0x5 metadata hash type, 0x8 hash info, 0x100 patch info,
+0x140 generation, 0x144 secure value, 0x148 sparse info, 0x178 compression info,
+0x1A0 metadata hash info. The 14.0.0+ fields (SHA3 hash types, skip-layer-hash
+encryption types, metadata hash info), sparse and compressed sections are only
+detected, so they can be reported as unsupported.
 """
 
 from __future__ import annotations
@@ -50,9 +54,27 @@ DISTRIBUTION = {0: "Download", 1: "GameCard"}
 
 FS_ROMFS, FS_PFS0 = 0, 1
 HASH_AUTO, HASH_NONE, HASH_SHA256, HASH_IVFC = 0, 1, 2, 3
+HASH_SHA3 = (4, 5, 6)  # AutoSha3, HierarchicalSha3256, HierarchicalIntegritySha3 (14.0.0+)
 ENC_NONE, ENC_XTS, ENC_CTR, ENC_CTR_EX = 1, 2, 3, 4
-HASH_NAMES = {0: "auto", 1: "none", 2: "HierarchicalSha256", 3: "HierarchicalIntegrity"}
-ENC_NAMES = {0: "auto", 1: "none", 2: "AES-XTS", 3: "AES-CTR", 4: "AES-CTR-Ex (BKTR)"}
+ENC_CTR_SKIP, ENC_CTR_EX_SKIP = 5, 6  # skip-layer-hash variants (14.0.0+)
+HASH_NAMES = {
+    0: "auto",
+    1: "none",
+    2: "HierarchicalSha256",
+    3: "HierarchicalIntegrity",
+    4: "auto (SHA3)",
+    5: "HierarchicalSha3256",
+    6: "HierarchicalIntegritySha3",
+}
+ENC_NAMES = {
+    0: "auto",
+    1: "none",
+    2: "AES-XTS",
+    3: "AES-CTR",
+    4: "AES-CTR-Ex (BKTR)",
+    5: "AES-CTR (skip layer hash)",
+    6: "AES-CTR-Ex (BKTR, skip layer hash)",
+}
 
 
 def decrypt_header(raw: bytes, keyset: Keyset | None) -> tuple[bytes, bool]:
@@ -102,6 +124,10 @@ class FsHeader:
         return self.raw[4]
 
     @property
+    def metadata_hash_type(self) -> int:
+        return self.raw[5]
+
+    @property
     def hash_info(self) -> bytes:
         return self.raw[0x8:0x100]
 
@@ -117,13 +143,18 @@ class FsHeader:
 
     @property
     def has_sparse_info(self) -> bool:
-        # Not cross-verified: sparse meta size at 0x150. Only used to refuse.
+        # SparseInfo at 0x148: table size at +0x8.
         return u64(self.raw, 0x150) != 0
 
     @property
     def has_compression_info(self) -> bool:
-        # Not cross-verified: compression table size at 0x180. Only used to refuse.
+        # CompressionInfo at 0x178: table size at +0x8.
         return u64(self.raw, 0x180) != 0
+
+    @property
+    def has_metadata_hash_info(self) -> bool:
+        # MetaDataHashType at 0x5; MetaDataHashDataInfo at 0x1A0: table size at +0x8.
+        return self.metadata_hash_type != 0 or u64(self.raw, 0x1A8) != 0
 
 
 @dataclass(frozen=True)
@@ -281,18 +312,24 @@ class Section:
     def unsupported_reason(self) -> str | None:
         """Why this section cannot be decoded, or ``None`` if it can."""
         fs = self.fs
-        if fs.encryption_type == ENC_CTR_EX or fs.has_patch_info:
+        if fs.encryption_type in (ENC_CTR_EX, ENC_CTR_EX_SKIP) or fs.has_patch_info:
             return "BKTR patch section (update/patch NCA): needs the base game, not supported"
         if fs.has_sparse_info:
             return "sparse storage section: not supported"
         if fs.has_compression_info:
             return "compressed storage section: not supported"
+        if fs.has_metadata_hash_info:
+            return "metadata hash layer (14.0.0+): not supported"
+        if fs.encryption_type == ENC_CTR_SKIP:
+            return "AES-CTR skip-layer-hash section (14.0.0+): not supported"
         if fs.fs_type not in (FS_PFS0, FS_ROMFS):
             return f"unknown section format type {fs.fs_type}"
         if fs.encryption_type not in (ENC_NONE, ENC_XTS, ENC_CTR) and not self.nca.plaintext:
             return f"unknown encryption type {fs.encryption_type}"
+        if fs.hash_type in HASH_SHA3:
+            return f"unsupported hash type {fs.hash_type} ({HASH_NAMES[fs.hash_type]}, 14.0.0+)"
         if self.effective_hash_type not in (HASH_NONE, HASH_SHA256, HASH_IVFC):
-            return f"unsupported hash type {fs.hash_type} (e.g. SHA3 layers)"
+            return f"unsupported hash type {fs.hash_type}"
         if fs.encryption_type == ENC_XTS and self.nca.header.has_rights_id:
             return "AES-XTS section with a rights ID: not supported"
         return None
@@ -321,8 +358,7 @@ class Section:
         if htype == HASH_NONE:
             return HashLayout(HASH_NONE, 0, self.size)
         if htype == HASH_SHA256:
-            # Intended spec (not yet cross-checked):
-            # https://switchbrew.org/wiki/NCA#HierarchicalSha256
+            # Spec: https://switchbrew.org/wiki/NCA#HierarchicalSha256
             block, count = u32(info, 0x20), u32(info, 0x24)
             if not 1 <= count <= 5:
                 raise FormatError(f"section {self.index}: bad HierarchicalSha256 layer count")
@@ -333,11 +369,10 @@ class Section:
             off, size, _ = layers[-1]
             return HashLayout(HASH_SHA256, off, size, info[:0x20], block, layers)
         if htype == HASH_IVFC:
-            # Intended spec (not yet cross-checked):
-            # https://switchbrew.org/wiki/NCA#HierarchicalIntegrity
+            # Spec: https://switchbrew.org/wiki/NCA#HierarchicalIntegrity
             if info[:4] != b"IVFC":
                 raise FormatError(f"section {self.index}: missing IVFC header")
-            n = u32(info, 0xC) - 1  # num_levels counts the master hash
+            n = u32(info, 0xC) - 1  # MaxLayers counts the master hash (per the references)
             if not 1 <= n <= 6:
                 raise FormatError(f"section {self.index}: bad IVFC level count")
             levels = tuple(

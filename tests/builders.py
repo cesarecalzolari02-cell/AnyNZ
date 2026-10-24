@@ -136,6 +136,8 @@ class SectionSpec:
     ivfc_block_log2: int = 9
     patch: bool = False  # mark as a BKTR patch section
     hash_type: int | None = None  # override
+    enc_type: int | None = None  # override the FS header's encryption type byte
+    fs_bytes: dict[int, bytes] = field(default_factory=dict)  # raw FS header overrides
     secure_value: bytes = field(default_factory=lambda: os.urandom(8))
 
 
@@ -209,10 +211,14 @@ def build_nca(
         enc_type = {"none": 1, "xts": 2, "ctr": 3}[spec.crypto]
         if spec.patch:
             enc_type = 4
+        if spec.enc_type is not None:
+            enc_type = spec.enc_type
         fs = bytearray(0x200)
         struct.pack_into("<HBBB", fs, 0, 2, fs_type, hash_type, enc_type)
         fs[0x8:0x100] = info
         fs[0x140:0x148] = spec.secure_value
+        for off, value in spec.fs_bytes.items():
+            fs[off : off + len(value)] = value
         if spec.patch:
             struct.pack_into("<QQ", fs, 0x100, len(image) // 2, 0x100)
             struct.pack_into("<QQ", fs, 0x120, len(image) // 2 + 0x100, 0x100)

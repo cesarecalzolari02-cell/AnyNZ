@@ -186,6 +186,30 @@ def test_bktr_and_unknown_hash_types_are_unsupported() -> None:
         patch.data()
 
 
+NEWER_FS_FIELDS = [
+    # (SectionSpec overrides, expected reason) per Switchbrew NCA FS header
+    ({"fs_bytes": {0x150: (0x40).to_bytes(8, "little")}}, "sparse"),
+    ({"fs_bytes": {0x180: (0x40).to_bytes(8, "little")}}, "compressed"),
+    ({"fs_bytes": {0x5: b""}}, "metadata hash"),
+    ({"fs_bytes": {0x1A8: (0x40).to_bytes(8, "little")}}, "metadata hash"),
+    ({"hash_type": 4}, "hash type 4 (auto (SHA3)"),
+    ({"hash_type": 5}, "hash type 5 (HierarchicalSha3256"),
+    ({"hash_type": 6}, "hash type 6 (HierarchicalIntegritySha3"),
+    ({"enc_type": 5}, "skip-layer-hash"),
+    ({"enc_type": 6}, "BKTR"),
+]
+
+
+@pytest.mark.parametrize(("overrides", "reason"), NEWER_FS_FIELDS)
+def test_newer_fs_header_fields_are_unsupported(overrides: dict, reason: str) -> None:
+    keys = make_keys()
+    blob = build_nca(keys, [SectionSpec("romfs", os.urandom(0x1000), **overrides)])
+    section = open_nca(blob, keys).sections[0]
+    assert reason in (section.unsupported_reason() or "")
+    with pytest.raises(UnsupportedError):
+        section.data()
+
+
 def test_truncated_nca() -> None:
     keys = make_keys()
     blob = build_nca(keys, [SectionSpec("romfs", os.urandom(0x4000))])
