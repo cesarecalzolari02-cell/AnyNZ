@@ -91,7 +91,7 @@ into memory.
 | Personalized tickets | "personalized ticket: only common tickets are supported" |
 | Keys for a newer key generation than your keys file has | `missing key: ...` naming the key and the key generation |
 | NSZ / XCZ / NCZ (compressed) | "compressed; decompress first" |
-| NCA0, sparse sections, compressed sections, SHA3 hash layers, unknown types | "... not supported" |
+| NCA0, sparse sections, compressed sections, metadata hash layers, SHA3 hash layers, skip-layer-hash encryption, unknown types | "... not supported" |
 | Header / NPDM RSA signature checks, XCI header decryption | not implemented |
 
 Out of scope: downloading anything, hosting or distributing keys, patching,
@@ -99,26 +99,40 @@ signing, re-packing, or bypassing online checks.
 
 ## Specification sources
 
-The layouts were taken from the open-source reference implementations hactool
-(ISC) and libnintendo-hac / libnintendo-es (MIT, used by nstool), read-only. All
-code here is original. Each module's docstring names the reference files it
-follows (`Reference:`).
+The layouts were first taken from the open-source reference implementations
+hactool (ISC) and libnintendo-hac / libnintendo-es (MIT, used by nstool),
+read-only. All code here is original.
 
-The intended specification is the [Switchbrew wiki](https://switchbrew.org/wiki/)
-([XCI](https://switchbrew.org/wiki/XCI), [NCA](https://switchbrew.org/wiki/NCA),
-[RomFS](https://switchbrew.org/wiki/RomFS), [Ticket](https://switchbrew.org/wiki/Ticket),
-[CNMT](https://switchbrew.org/wiki/CNMT), [NACP](https://switchbrew.org/wiki/NACP)),
-but the code has **not yet been cross-checked** against it. Docstrings list those
-pages as `Intended spec (not yet cross-checked)`.
+They were then checked against the [Switchbrew wiki](https://switchbrew.org/wiki/)
+pages for [XCI](https://switchbrew.org/wiki/XCI), [NCA](https://switchbrew.org/wiki/NCA)
+(header, FS header, section and hash types, PartitionFS),
+[Ticket](https://switchbrew.org/wiki/Ticket), [CNMT](https://switchbrew.org/wiki/CNMT),
+[NCM services](https://switchbrew.org/wiki/NCM_services) (content meta and content
+type enums) and [NACP](https://switchbrew.org/wiki/NACP). Module docstrings say
+`Spec:` for what was checked against the wiki and `Reference:` for what relies on
+hactool/libnintendo only.
 
-Not confirmed by the two reference implementations, so handled defensively:
+Switchbrew does not document these, so they rest on the reference implementations
+alone:
 
-- the byte order of the ticket signature type (both orders are accepted);
-- newer NCA FS-header fields (sparse info at 0x148, compression info at 0x178,
-  SHA3 hash types, "skip layer hash" encryption types). These are only used to
-  *detect and refuse* such sections, never to decode them;
-- XCI dumps that start with the 0x1000-byte key area (`HEAD` is probed at 0x100
-  and 0x1100).
+- the RomFS header and directory/file entry layout (there is no RomFS page);
+- the AES-CTR section counter (8 bytes from FS header 0x140, then offset >> 4);
+- key derivation (`header_key`, key-area keys, `titlekek`, title-key unwrapping);
+- the IVFC level count convention, NCA content ID = first 16 bytes of the
+  SHA-256, and whether the XCI `PartitionFsHeaderAddress` counts from the card
+  header.
+
+The three details that were previously unconfirmed:
+
+- **Ticket signature type byte order:** still unconfirmed. Switchbrew lists the
+  types and sizes but not their byte order, so both orders are accepted.
+- **Newer NCA FS-header fields:** confirmed by Switchbrew (sparse info at 0x148,
+  compression info at 0x178, metadata hash type at 0x5 and info at 0x1A0, SHA3
+  hash types 4-6, skip-layer-hash encryption types 5-6). These are only used to
+  *detect and refuse* such sections, never to decode them.
+- **XCI dumps with the 0x1000-byte key area:** confirmed by Switchbrew: the
+  CardKeyArea precedes the card header on the card and is hidden from raw reads,
+  so `HEAD` is at 0x100 in a normal dump and 0x1100 with the key area.
 
 ## Testing on your own files
 
