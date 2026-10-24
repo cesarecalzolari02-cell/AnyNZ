@@ -151,7 +151,3 @@ def verify_container(c: Container, keyset: Keyset | None, quick: bool = False) -
     for note in report.notes:
         checks.append(Check("container", "note", None, note))
     return checks
-
-
-def verify_nca_file(nca: Nca, f: ContainerFile, quick: bool = False) -> list[Check]:
-    return [*content_id_checks(f, None, quick), *nca_checks(nca, f.path, quick)]

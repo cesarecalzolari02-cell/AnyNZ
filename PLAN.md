@@ -14,7 +14,7 @@ patches or signs anything.
   (common only), section readers (none / CTR / XTS).
 - [x] **Phase 3: extraction + info/verify.** ExeFS/PFS0 and RomFS (IVFC) extraction,
   CNMT/NACP, `info`, `nca-extract`, `verify`.
-- [ ] **Phase 4: polish.** README, `scripts/smoke.py`, CLI help, last checks,
+- [x] **Phase 4: polish.** README, `scripts/smoke.py`, CLI help, last checks,
   private GitHub repo.
 
 Each phase ends with `ruff check`, `ruff format --check`, `pytest` and a commit.

@@ -129,6 +129,8 @@ def print_info(report: TitleReport, name: str) -> None:
             print(f"Publisher: {publisher}")
             if nacp.display_version:
                 print(f"Display version: {nacp.display_version}")
+        else:
+            print("Name:     (no Control NCA for this title; DLC and some updates have none)")
     if not report.metas:
         print("Title:    (no readable content metadata)")
     print()
@@ -210,7 +212,7 @@ def cmd_nca_extract(args: argparse.Namespace) -> int:
             if not ncas:
                 raise NxError(f"no NCA named {', '.join(args.nca)}")
         for f in ncas:
-            dest = out if c.kind == "NCA" else out / f.name.split(".")[0]
+            dest = out if c.kind == "NCA" else safe_join(out, f.name.split(".")[0])
             print(f"{f.path}:")
             try:
                 nca = Nca(f.storage, keyset, tickets, name=f.name)
