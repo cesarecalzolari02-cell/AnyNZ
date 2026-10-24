@@ -3,8 +3,8 @@
 
     python scripts/smoke.py KEYS FILE [--full] [--extract]
 
-Runs ``info``, ``list`` and ``verify --quick`` (``--full`` for the full hash
-check) on FILE using the keys file KEYS. With ``--extract``, also runs
+Runs ``info``, ``list``, ``verify --quick`` (``--full`` for the full hash
+check) and ``titles`` on FILE using the keys file KEYS. With ``--extract``, also runs
 ``nca-extract`` into a temporary directory outside the repository and deletes
 it afterwards, reporting only file counts.
 
@@ -54,6 +54,7 @@ def main() -> int:
         "info": run("info", ["info", *keys, target]),
         "list": run("list", ["list", *keys, target]),
         "verify": run("verify", ["verify", *keys, target, *([] if args.full else ["--quick"])]),
+        "titles": run("titles", ["titles", *keys, target]),
     }
     if args.extract:
         tmp = Path(tempfile.mkdtemp(prefix="nx-decode-smoke-"))
