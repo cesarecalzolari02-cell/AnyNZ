@@ -98,6 +98,7 @@ def test_resolve_path_precedence(tmp_path, monkeypatch) -> None:
     assert resolve_keys_path(None) == b
     monkeypatch.delenv("SWITCH_KEYS")
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # expanduser() on Windows
     with pytest.raises(KeysError, match="keys file not found"):
         resolve_keys_path(None)
     (tmp_path / ".switch").mkdir()
