@@ -69,3 +69,10 @@ def test_nacp_and_cnmt() -> None:
     assert cnmt.type_name == "Patch" and cnmt.version == 0x10000
     assert [r.size for r in cnmt.contents] == [0x400, 0x10000]
     assert [r.type_name for r in cnmt.contents] == ["Program", "Control"]
+
+
+def test_cnmt_size_ignores_content_attributes() -> None:
+    # 15.0.0+ records: 5-byte size at 0x30, ContentAttributes at 0x35.
+    blob = os.urandom(0x400)
+    cnmt = parse_cnmt(build_cnmt(0x0100000000001000, 0, 0x80, [(blob, 1)], attributes=0x01))
+    assert cnmt.contents[0].size == 0x400

@@ -1,11 +1,12 @@
 """Content metadata (CNMT) and application control properties (NACP).
 
 * CNMT, the ``*.cnmt`` file in a Meta NCA's PFS0 section.
-  Reference: libnintendo-hac ``cnmt.h``.
-  Intended spec (not yet cross-checked): https://switchbrew.org/wiki/CNMT.
+  Spec: https://switchbrew.org/wiki/CNMT (header, 0x38-byte content record),
+  https://switchbrew.org/wiki/NCM_services (ContentMetaType, ContentType).
+  Reference: libnintendo-hac ``cnmt.h`` (records start after the extended header).
 * NACP, ``control.nacp`` in a Control NCA's RomFS.
-  Reference: libnintendo-hac ``nacp.h``.
-  Intended spec (not yet cross-checked): https://switchbrew.org/wiki/NACP.
+  Spec: https://switchbrew.org/wiki/NACP (title entries, languages 0-15,
+  DisplayVersion). Reference: libnintendo-hac ``nacp.h``.
 """
 
 from __future__ import annotations
@@ -92,7 +93,8 @@ def parse_cnmt(data: bytes) -> Cnmt:
     records = []
     for i in range(count):
         r = data[base + i * 0x38 : base + (i + 1) * 0x38]
-        size = u32(r, 0x30) | (u16(r, 0x34) << 32)
+        # 15.0.0+: 5-byte size, then ContentAttributes at 0x35 (older CNMTs leave it 0).
+        size = u32(r, 0x30) | (r[0x34] << 32)
         records.append(ContentRecord(r[:0x20], r[0x20:0x30], size, r[0x36]))
     return Cnmt(u64(data, 0), u32(data, 8), data[0xC], tuple(records))
 

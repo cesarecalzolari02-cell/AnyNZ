@@ -369,7 +369,11 @@ def build_nacp(name: str, publisher: str, display_version: str = "1.0.0", lang: 
 
 
 def build_cnmt(
-    title_id: int, version: int, meta_type: int, contents: list[tuple[bytes, int]]
+    title_id: int,
+    version: int,
+    meta_type: int,
+    contents: list[tuple[bytes, int]],
+    attributes: int = 0,
 ) -> bytes:
     """``contents`` is ``[(nca bytes, record content type)]``."""
     ext = bytes(0x10)
@@ -392,7 +396,8 @@ def build_cnmt(
     for blob, ctype in contents:
         digest = hashlib.sha256(blob).digest()
         size = len(blob)
-        recs += digest + digest[:16] + struct.pack("<IHBB", size & 0xFFFFFFFF, size >> 32, ctype, 0)
+        lo, hi = size & 0xFFFFFFFF, size >> 32
+        recs += digest + digest[:16] + struct.pack("<IBBBB", lo, hi, attributes, ctype, 0)
     return hdr + ext + recs
 
 
