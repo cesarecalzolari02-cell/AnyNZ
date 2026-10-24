@@ -1,7 +1,8 @@
 """NCA (Nintendo Content Archive): header decryption, key resolution, section access.
 
-Spec: https://switchbrew.org/wiki/NCA (cross-checked: hactool ``nca.c``/``nca.h``,
-libnintendo-hac ``nca.h`` and ``ContentArchiveUtil.cpp``).
+Reference: hactool ``nca.c``/``nca.h``, libnintendo-hac ``nca.h`` and
+``ContentArchiveUtil.cpp``.
+Intended spec (not yet cross-checked): https://switchbrew.org/wiki/NCA.
 
 Header (0xC00 bytes, AES-128-XTS with ``header_key``, 0x200-byte sectors, Nintendo
 big-endian tweak). NCA3 numbers the six sectors 0..5. NCA2 encrypts each FS header
@@ -320,6 +321,7 @@ class Section:
         if htype == HASH_NONE:
             return HashLayout(HASH_NONE, 0, self.size)
         if htype == HASH_SHA256:
+            # Intended spec (not yet cross-checked):
             # https://switchbrew.org/wiki/NCA#HierarchicalSha256
             block, count = u32(info, 0x20), u32(info, 0x24)
             if not 1 <= count <= 5:
@@ -331,6 +333,7 @@ class Section:
             off, size, _ = layers[-1]
             return HashLayout(HASH_SHA256, off, size, info[:0x20], block, layers)
         if htype == HASH_IVFC:
+            # Intended spec (not yet cross-checked):
             # https://switchbrew.org/wiki/NCA#HierarchicalIntegrity
             if info[:4] != b"IVFC":
                 raise FormatError(f"section {self.index}: missing IVFC header")

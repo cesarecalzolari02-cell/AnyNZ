@@ -99,16 +99,19 @@ signing, re-packing, or bypassing online checks.
 
 ## Specification sources
 
-The formats are documented on the [Switchbrew wiki](https://switchbrew.org/wiki/)
+The layouts were taken from the open-source reference implementations hactool
+(ISC) and libnintendo-hac / libnintendo-es (MIT, used by nstool), read-only. All
+code here is original. Each module's docstring names the reference files it
+follows (`Reference:`).
+
+The intended specification is the [Switchbrew wiki](https://switchbrew.org/wiki/)
 ([XCI](https://switchbrew.org/wiki/XCI), [NCA](https://switchbrew.org/wiki/NCA),
 [RomFS](https://switchbrew.org/wiki/RomFS), [Ticket](https://switchbrew.org/wiki/Ticket),
-[CNMT](https://switchbrew.org/wiki/CNMT), [NACP](https://switchbrew.org/wiki/NACP)).
-Each module's docstring names the page it implements. Layouts were cross-checked
-against the open-source reference implementations hactool (ISC) and
-libnintendo-hac / libnintendo-es (MIT, used by nstool), read-only. All code here
-is original.
+[CNMT](https://switchbrew.org/wiki/CNMT), [NACP](https://switchbrew.org/wiki/NACP)),
+but the code has **not yet been cross-checked** against it. Docstrings list those
+pages as `Intended spec (not yet cross-checked)`.
 
-Not confirmed by two independent sources, so handled defensively:
+Not confirmed by the two reference implementations, so handled defensively:
 
 - the byte order of the ticket signature type (both orders are accepted);
 - newer NCA FS-header fields (sparse info at 0x148, compression info at 0x178,

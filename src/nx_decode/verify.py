@@ -1,13 +1,16 @@
 """Integrity checks for containers and NCAs.
 
 * XCI: root HFS0 header hash (card header 0x140) and each HFS0 entry's hash of
-  its first ``hashed_size`` bytes (https://switchbrew.org/wiki/XCI).
+  its first ``hashed_size`` bytes.
 * NCA content ID: the file name is the first 16 bytes of the SHA-256 of the
-  whole NCA; the CNMT records the full hash and size
-  (https://switchbrew.org/wiki/NCA, https://switchbrew.org/wiki/CNMT).
+  whole NCA; the CNMT records the full hash and size.
 * NCA FS headers: SHA-256 of each FS header is stored in the main header.
 * Section hash layers: HierarchicalSha256 (partial last block hashed as-is) and
   IVFC (blocks zero-padded), as in hactool ``nca_section_check_hash_table``.
+
+Reference: hactool, libnintendo-hac. Intended spec (not yet cross-checked):
+https://switchbrew.org/wiki/XCI, https://switchbrew.org/wiki/NCA,
+https://switchbrew.org/wiki/CNMT.
 
 Every check yields a :class:`Check`; ``ok=None`` means skipped (unsupported or
 ``quick`` mode), never failed.

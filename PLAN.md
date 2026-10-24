@@ -21,12 +21,16 @@ Each phase ends with `ruff check`, `ruff format --check`, `pytest` and a commit.
 
 ## Spec sources
 
-Switchbrew (XCI, HFS0/PFS0, NCA, RomFS, Ticket) could not be reached from the
-development environment. Layouts were taken from, and cross-checked between, the
-read-only reference implementations hactool (ISC) and libnintendo-hac /
-libnintendo-es (MIT). No code was copied.
+Layouts were taken from, and cross-checked between, the read-only reference
+implementations hactool (ISC) and libnintendo-hac / libnintendo-es (MIT). No code
+was copied. Module docstrings name these as `Reference:`.
 
-Not verified against two sources (handled defensively):
+Switchbrew (XCI, HFS0/PFS0, NCA, RomFS, Ticket, CNMT, NACP) is the intended spec,
+but it could not be reached from the development environment, so the code has
+not yet been cross-checked against it. Docstrings list those pages as
+`Intended spec (not yet cross-checked)`.
+
+Not confirmed by the two reference implementations (handled defensively):
 
 1. Ticket signature-type byte order (both orders accepted).
 2. Newer NCA FS-header fields (compression info, metadata hash info, SHA3 hash

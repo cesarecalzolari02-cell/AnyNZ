@@ -1,9 +1,11 @@
 """Content metadata (CNMT) and application control properties (NACP).
 
-* CNMT, the ``*.cnmt`` file in a Meta NCA's PFS0 section:
-  https://switchbrew.org/wiki/CNMT (cross-checked: libnintendo-hac ``cnmt.h``).
-* NACP, ``control.nacp`` in a Control NCA's RomFS:
-  https://switchbrew.org/wiki/NACP (cross-checked: libnintendo-hac ``nacp.h``).
+* CNMT, the ``*.cnmt`` file in a Meta NCA's PFS0 section.
+  Reference: libnintendo-hac ``cnmt.h``.
+  Intended spec (not yet cross-checked): https://switchbrew.org/wiki/CNMT.
+* NACP, ``control.nacp`` in a Control NCA's RomFS.
+  Reference: libnintendo-hac ``nacp.h``.
+  Intended spec (not yet cross-checked): https://switchbrew.org/wiki/NACP.
 """
 
 from __future__ import annotations

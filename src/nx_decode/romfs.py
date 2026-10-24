@@ -1,7 +1,7 @@
 """RomFS: the read-only filesystem in NCA RomFS sections (after the IVFC levels).
 
-Spec: https://switchbrew.org/wiki/RomFS (cross-checked: hactool ``ivfc.h``,
-libnintendo-hac ``romfs.h``).
+Reference: hactool ``ivfc.h``, libnintendo-hac ``romfs.h``.
+Intended spec (not yet cross-checked): https://switchbrew.org/wiki/RomFS.
 
 Header (0x50 bytes): header size, then (offset, size) pairs for the directory hash
 table, directory metadata table, file hash table and file metadata table, then the

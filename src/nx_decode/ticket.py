@@ -1,7 +1,8 @@
 """eTicket parsing, just enough to unwrap common title keys.
 
-Layout: https://switchbrew.org/wiki/Ticket (cross-checked: libnintendo-es
-``ticket.h`` ``sTicketBody_v2``; signature block sizes from hactool/nstool).
+Reference: libnintendo-es ``ticket.h`` ``sTicketBody_v2``; signature block sizes
+from hactool/nstool.
+Intended spec (not yet cross-checked): https://switchbrew.org/wiki/Ticket.
 
 A ticket starts with a signature block whose size depends on the signature type,
 then the body:
