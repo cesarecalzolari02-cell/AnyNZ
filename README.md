@@ -105,6 +105,12 @@ unreadable or compressed files are errors (exit status 1).
 All reads are streamed in 1 MiB chunks, so multi-gigabyte XCIs are never loaded
 into memory.
 
+When a name inside a container can't be a file on your system (`..` or a drive
+letter anywhere; on Windows also characters such as `?` or `|`, a trailing dot or
+space, or device names like `CON` and `NUL`), that one file is skipped and listed,
+the rest still extracts, and the exit status is 1. Nothing is renamed. On Windows,
+paths longer than 260 characters work even with Windows' long-path setting off.
+
 ### Supported
 
 | Area | Supported |

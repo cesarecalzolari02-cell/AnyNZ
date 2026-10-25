@@ -135,10 +135,11 @@ the terminal only) and check:
 11. **Personalized tickets:** whether Lockpick_RCM's `eticket_rsa_keypair` really is
     D | N | E | ... (nx-decode refuses anything else as "not a usable keypair"),
     and that a personalized eShop dump of yours decrypts.
-12. **Extraction on Windows:** RomFS paths longer than 260 characters (they need
-    long paths enabled in Windows) and file names with characters Windows forbids
-    (`<>:"|?*`). Today a path Windows can't create stops `nca-extract` with an OS
-    error, and a `:` skips the whole section.
+12. **Extraction on Windows:** deep RomFS paths now go through the `\\?\` prefix,
+    and names Windows forbids (`<>:"|?*`, trailing dot or space, `CON`/`NUL`/...)
+    are skipped and listed. On real games, check whether any file is skipped at all,
+    and that long paths extract on a machine with Windows' long-path setting off
+    (the developer machine and CI runners have it on).
 
 If one of these turns out wrong, reproduce it with a synthetic fixture first, then
 fix the code, so the regression test exists without the real file.

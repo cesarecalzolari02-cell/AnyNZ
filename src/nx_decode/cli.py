@@ -18,8 +18,8 @@ from .containers import (
     open_container,
     sniff,
 )
-from .errors import KeysError, NxError
-from .io import FileStorage, MemoryStorage, Storage, safe_join
+from .errors import KeysError, NxError, OutputPathError
+from .io import FileStorage, MemoryStorage, Storage, safe_join, write_entry
 from .keys import Keyset
 from .library import Library, scan
 from .nca import DISTRIBUTION, ENC_NAMES, HASH_NAMES, Nca, Section
@@ -121,12 +121,18 @@ def cmd_extract(args: argparse.Namespace) -> int:
         selected = [f for f in c.files if not args.partition or f.partition == args.partition]
         if args.partition and not selected:
             raise NxError(f"no files in partition {args.partition!r}")
+        skipped = 0
         for f in selected:
-            dest = safe_join(out, f.path)
             print(f"  {f.path} ({human(f.size)})")
-            f.storage.copy_to(dest)
-        print(f"extracted {len(selected)} files to {out}")
-    return EXIT_OK
+            try:
+                write_entry(f.storage, out, f.path)
+            except OutputPathError as e:
+                skipped += 1
+                print(f"    skipped: {e}")
+        print(f"extracted {len(selected) - skipped} files to {out}")
+    if skipped:
+        print(f"{skipped} file(s) could not be written (see above)", file=sys.stderr)
+    return EXIT_ERROR if skipped else EXIT_OK
 
 
 # ----------------------------------------------------------------------------- info
@@ -213,8 +219,10 @@ def cmd_info(args: argparse.Namespace) -> int:
 # ----------------------------------------------------------------------------- nca-extract
 
 
-def extract_section(s: Section, out: Path) -> str:
-    """Extract one section's files. Returns a one-line summary."""
+def extract_section(s: Section, out: Path, skipped: list[tuple[str, str]]) -> str:
+    """Extract one section's files. Returns a one-line summary; files that can't be
+    written under their name are added to ``skipped`` and the rest still extract."""
+    before = len(skipped)
     if s.kind == "PFS0":
         pfs = PartitionFS.parse(s.data())
         names = {e.name for e in pfs.entries}
@@ -222,11 +230,19 @@ def extract_section(s: Section, out: Path) -> str:
         dest = out / f"section{s.index}_{label}"
         dest.mkdir(parents=True, exist_ok=True)
         for e in pfs.entries:
-            pfs.open(e).copy_to(safe_join(dest, e.name))
-        return f"section {s.index}: {label}, {len(pfs.entries)} files -> {dest}"
-    dest = out / f"section{s.index}_romfs"
-    count, total = RomFS(s.data()).extract(dest)
-    return f"section {s.index}: romfs, {count} files ({human(total)}) -> {dest}"
+            try:
+                write_entry(pfs.open(e), dest, e.name)
+            except OutputPathError as err:
+                skipped.append((e.name, str(err)))
+        count = len(pfs.entries) - (len(skipped) - before)
+        summary = f"section {s.index}: {label}, {count} files -> {dest}"
+    else:
+        dest = out / f"section{s.index}_romfs"
+        count, total = RomFS(s.data()).extract(dest, skipped)
+        summary = f"section {s.index}: romfs, {count} files ({human(total)}) -> {dest}"
+    if len(skipped) > before:
+        summary += f", {len(skipped) - before} skipped"
+    return summary
 
 
 def nca_extract_jobs(
@@ -291,7 +307,11 @@ def cmd_nca_extract(args: argparse.Namespace) -> int:
                     continue
                 try:
                     s.check_supported()
-                    print("  " + extract_section(s, dest))
+                    skipped: list[tuple[str, str]] = []
+                    print("  " + extract_section(s, dest, skipped))
+                    for path, reason in skipped:
+                        print(f"    skipped file {path}: {reason}")
+                    problems += len(skipped)
                 except NxError as e:
                     problems += 1
                     print(f"  skipped section {s.index}: {e}")

@@ -15,6 +15,11 @@ class FormatError(NxError):
     """The file is malformed, truncated, or not the format we expected."""
 
 
+class OutputPathError(FormatError):
+    """A name inside a container can't be written as a file here: unsafe (``..``,
+    drive letters) or not allowed by the operating system."""
+
+
 class UnsupportedError(NxError):
     """The file is valid but uses a feature nx-decode does not implement."""
 

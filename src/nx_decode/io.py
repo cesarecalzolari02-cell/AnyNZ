@@ -9,6 +9,7 @@ time.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 from abc import ABC, abstractmethod
@@ -16,9 +17,23 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
 
-from .errors import FormatError
+from .errors import FormatError, OutputPathError
 
 CHUNK = 1024 * 1024
+WINDOWS = os.name == "nt"
+WINDOWS_FORBIDDEN = frozenset('<>:"|?*') | frozenset(map(chr, range(32)))
+WINDOWS_DEVICES = frozenset(
+    [
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    ]
+)
+# Write errors that would hit every following file too: stop instead of skipping.
+FATAL_WRITE_ERRORS = frozenset({errno.ENOSPC, errno.EROFS, getattr(errno, "EDQUOT", errno.ENOSPC)})
 
 
 class Storage(ABC):
@@ -62,13 +77,6 @@ class Storage(ABC):
         for chunk in self.iter_chunks(offset, size):
             h.update(chunk)
         return h.digest()
-
-    def copy_to(self, path: Path) -> None:
-        """Stream the whole storage into a new file at ``path``."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as out:
-            for chunk in self.iter_chunks():
-                out.write(chunk)
 
 
 class FileStorage(Storage):
@@ -158,14 +166,66 @@ def cstr(data: bytes, off: int = 0, limit: int | None = None) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def windows_name_problem(piece: str) -> str | None:
+    """Why Windows can't hold a file or folder called ``piece``, or ``None``."""
+    if any(ch in WINDOWS_FORBIDDEN for ch in piece):
+        return "has a character Windows does not allow in file names"
+    if piece[-1] in " .":
+        return "ends with a space or dot, which Windows would drop"
+    if piece.split(".")[0].rstrip(" ").upper() in WINDOWS_DEVICES:
+        return "is a reserved device name on Windows"
+    return None
+
+
 def safe_join(base: Path, *parts: str) -> Path:
-    """Join untrusted path components under ``base``, refusing traversal."""
+    """Join untrusted path components under ``base``, refusing traversal.
+
+    On Windows, names Windows can't hold are refused too, so nothing is silently
+    renamed or written to a device such as ``NUL``.
+    """
     out = base
     for part in parts:
         for piece in part.replace("\\", "/").split("/"):
             if piece in ("", "."):
                 continue
             if piece == ".." or ":" in piece:
-                raise FormatError(f"refusing unsafe path component {piece!r}")
+                raise OutputPathError(f"refusing unsafe path component {piece!r}")
+            if WINDOWS and (why := windows_name_problem(piece)):
+                raise OutputPathError(f"{piece!r} {why}")
             out = out / piece
     return out
+
+
+def native_path(path: Path) -> str:
+    """``path`` as the OS should get it. On Windows: absolute, with the ``\\\\?\\``
+    prefix, so paths longer than 260 characters work even with Windows' long-path
+    setting off (its default)."""
+    if not WINDOWS:
+        return os.fspath(path)
+    full = os.path.abspath(path)
+    if full.startswith("\\\\?\\"):
+        return full
+    if full.startswith("\\\\"):  # \\server\share\...
+        return "\\\\?\\UNC\\" + full[2:]
+    return "\\\\?\\" + full
+
+
+def write_entry(storage: Storage, base: Path, name: str) -> None:
+    """Stream ``storage`` into the file ``base/name`` (``name`` from a container).
+
+    A name that can't be a file here raises :class:`OutputPathError`, so callers can
+    skip that one file. Running out of space, or a read-only disk, still raises.
+    """
+    target = native_path(safe_join(base, name))
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        out = open(target, "wb")  # noqa: SIM115 (closed below)
+    except ValueError as e:  # e.g. a NUL in the name
+        raise OutputPathError(f"{name!r} cannot be a file name: {e}") from None
+    except OSError as e:
+        if e.errno in FATAL_WRITE_ERRORS:
+            raise
+        raise OutputPathError(f"{name!r} cannot be created here: {e.strerror or e}") from None
+    with out:
+        for chunk in storage.iter_chunks():
+            out.write(chunk)

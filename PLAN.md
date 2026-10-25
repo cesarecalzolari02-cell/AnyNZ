@@ -62,8 +62,8 @@ and 4):
 
 - [x] BKTR tables with a second offset level (Atmosphère's layout), entry sets read
   on demand; tested with small nodes and one real-size 1.67-million-entry table.
-- [ ] Windows extraction: a file whose path Windows can't create is skipped and
-  reported, and the rest of the RomFS still extracts.
+- [x] Windows extraction: a file whose path Windows can't create is skipped and
+  reported, and the rest of the RomFS still extracts; long paths via `\\?\`.
 
 Next (not started):
 

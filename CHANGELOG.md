@@ -22,6 +22,11 @@
   entries) the second offset level is read as Atmosphère lays it out. Entry sets
   are read and checked on first use, so memory follows the table, not its entry
   count.
+- Extraction skips, and lists, files whose name can't be a file here (unsafe
+  everywhere; characters, trailing dots or spaces and device names Windows refuses)
+  and extracts the rest, instead of stopping. On Windows, files are written through
+  the `\\?\` prefix so paths over 260 characters work with long paths off. A full
+  or read-only disk still stops extraction.
 - `scripts/smoke.py --base` and the demo apply an update. New synthetic fixtures:
   real BKTR sections (relocations into the base, several generations, an
   unencrypted subsection, multi-node tables), personalized games and DLC with a

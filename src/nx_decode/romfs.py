@@ -20,8 +20,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import FormatError
-from .io import Storage, safe_join, u32, u64
+from .errors import FormatError, OutputPathError
+from .io import Storage, u32, u64, write_entry
 
 HEADER_SIZE = 0x50
 NONE = 0xFFFFFFFF
@@ -98,12 +98,23 @@ class RomFS:
                 return f
         raise FormatError(f"no file {path!r} in RomFS")
 
-    def extract(self, out: Path) -> tuple[int, int]:
-        """Write the tree under ``out``. Returns ``(files, bytes)``."""
+    def extract(self, out: Path, skipped: list[tuple[str, str]] | None = None) -> tuple[int, int]:
+        """Write the tree under ``out``. Returns ``(files, bytes)`` written.
+
+        A file whose name can't be a file here (unsafe, or refused by the OS) is left
+        out and added to ``skipped`` as ``(path, reason)``; without ``skipped`` it
+        raises :class:`OutputPathError`.
+        """
         count = total = 0
         out.mkdir(parents=True, exist_ok=True)
         for f in self.walk():
-            self.open(f).copy_to(safe_join(out, f.path))
+            try:
+                write_entry(self.open(f), out, f.path)
+            except OutputPathError as e:
+                if skipped is None:
+                    raise
+                skipped.append((f.path, str(e)))
+                continue
             count += 1
             total += f.size
         return count, total
