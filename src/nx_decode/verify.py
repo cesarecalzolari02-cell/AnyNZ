@@ -26,7 +26,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from .containers import Container, ContainerFile, PartitionFS
-from .errors import MissingKeyError, MissingTicketError, NxError, UnsupportedError
+from .errors import KeysError, MissingTicketError, NxError, UnsupportedError
 from .io import CHUNK, Storage
 from .keys import Keyset
 from .meta import ContentRecord
@@ -123,7 +123,7 @@ def nca_checks(nca: Nca, subject: str, quick: bool) -> Iterator[Check]:
                 yield Check(subject, f"{what} hash tables", None, "skipped (--quick)")
             elif s.hash_layout.kind in (HASH_SHA256, HASH_IVFC):
                 yield Check(subject, f"{what} hash tables", section_hash_tables_ok(s))
-        except (MissingKeyError, MissingTicketError, UnsupportedError) as e:
+        except (KeysError, MissingTicketError, UnsupportedError) as e:
             yield Check(subject, what, None, str(e))
         except NxError as e:
             yield Check(subject, what, False, str(e))

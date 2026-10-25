@@ -9,6 +9,13 @@ Pre-derived keys (``header_key``, ``key_area_key_{application,ocean,system}_XX``
 Reference: hactool ``pki.c`` ``pki_derive_keys``/``generate_kek``. Switchbrew's
 Cryptosystem, SPL services and SMC pages do not describe this derivation chain.
 
+Personalized tickets: ``eticket_rsa_keypair`` (the console's eTicket RSA key, as
+Lockpick_RCM writes it) is read as private exponent D (0x100 bytes), modulus N
+(0x100), public exponent E (4, big-endian), then padding. Reference: nxdumptool's
+eTicket device key layout (the same fields after a 0x10-byte CTR); Lockpick_RCM's
+own source was not reachable to confirm the file layout, so the keypair is
+checked to work before it is used, and a different layout is a clear error.
+
 Key values never leave this module except as raw ``bytes`` handed to the
 crypto layer; nothing here formats a value into a string.
 """
@@ -20,6 +27,9 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
 from .crypto import ecb_decrypt
 from .errors import KeysError, MissingKeyError
 
@@ -27,6 +37,8 @@ DEFAULT_KEYS_PATH = Path("~/.switch/prod.keys")
 KEYS_ENV = "SWITCH_KEYS"
 
 KAEK_NAMES = ("application", "ocean", "system")
+ETICKET_KEY = "eticket_rsa_keypair"
+ETICKET_EXPONENT = 0x10001
 
 _LINE = re.compile(r"^\s*([A-Za-z0-9_]+)\s*[=,]\s*([0-9A-Fa-f]+)\s*$")
 
@@ -81,6 +93,7 @@ class Keyset:
     def __init__(self, keys: dict[str, bytes]) -> None:
         self._keys = dict(keys)
         self._derived: dict[str, bytes] = {}
+        self._eticket: rsa.RSAPrivateKey | None = None
 
     @classmethod
     def from_file(cls, path: str | os.PathLike[str]) -> Keyset:
@@ -194,3 +207,62 @@ class Keyset:
         key = derive(self._raw(master))
         self._derived[name] = key
         return key
+
+    def unwrap_personalized_title_key(self, block: bytes) -> bytes:
+        """Undo the RSA-2048-OAEP wrapping of a personalized ticket's title key block.
+
+        The result is the title key still encrypted with ``titlekek``, exactly what a
+        common ticket stores. OAEP with SHA-256 (hash and MGF1) and an empty label.
+        Spec: https://switchbrew.org/wiki/Ticket (personalized: an RSA-2048 message
+        for the console-unique ticket key). Reference: nxdumptool
+        ``keysDecryptRsaOaepWrappedTitleKey`` (OAEP, SHA-256, empty label).
+        """
+        key = self._eticket_key()
+        oaep = padding.OAEP(
+            mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None
+        )
+        try:
+            plain = key.decrypt(block[:0x100], oaep)
+        except ValueError:
+            raise KeysError(
+                f"personalized ticket did not decrypt with your {ETICKET_KEY} "
+                "(it may belong to another console)"
+            ) from None
+        if len(plain) < 0x10:
+            raise KeysError("personalized ticket holds no title key")
+        return plain[:0x10]
+
+    def _eticket_key(self) -> rsa.RSAPrivateKey:
+        if self._eticket is not None:
+            return self._eticket
+        raw = self._keys.get(ETICKET_KEY)
+        if raw is None:
+            raise MissingKeyError(
+                ETICKET_KEY,
+                "needed for personalized tickets; Lockpick_RCM dumps it from your own "
+                "console into prod.keys",
+            )
+        bad = KeysError(f"{ETICKET_KEY} is not a usable RSA-2048 keypair (unexpected layout?)")
+        if len(raw) < 0x204:
+            raise bad
+        d = int.from_bytes(raw[:0x100], "big")
+        n = int.from_bytes(raw[0x100:0x200], "big")
+        e = int.from_bytes(raw[0x200:0x204], "big")
+        # A wrong layout gives numbers that are not a keypair: m^(ed) mod n != m.
+        if e != ETICKET_EXPONENT or n.bit_length() != 2048 or pow(2, e * d, n) != 2:
+            raise bad
+        try:
+            p, q = rsa.rsa_recover_prime_factors(n, e, d)
+            numbers = rsa.RSAPrivateNumbers(
+                p,
+                q,
+                d,
+                rsa.rsa_crt_dmp1(d, p),
+                rsa.rsa_crt_dmq1(d, q),
+                rsa.rsa_crt_iqmp(p, q),
+                rsa.RSAPublicNumbers(e, n),
+            )
+            self._eticket = numbers.private_key()
+        except ValueError:
+            raise bad from None
+        return self._eticket

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .containers import Container, ContainerFile, PartitionFS, is_ncz
-from .errors import MissingKeyError, MissingTicketError, NxError, UnsupportedError
+from .errors import KeysError, MissingTicketError, NxError, UnsupportedError
 from .keys import Keyset
 from .meta import Cnmt, Nacp, parse_cnmt, parse_nacp
 from .nca import Nca
@@ -91,7 +91,7 @@ def probe_nca(
         rep.decrypts = checked > 0 or not rep.nca.sections
         if not rep.decrypts:
             rep.problem = "no section could be decoded"
-    except (MissingKeyError, MissingTicketError, UnsupportedError) as e:
+    except (KeysError, MissingTicketError, UnsupportedError) as e:
         rep.problem = str(e)
     except NxError as e:
         rep.problem = str(e)

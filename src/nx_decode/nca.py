@@ -51,8 +51,8 @@ from .bktr import (
 from .crypto import SECTOR, ctr_crypt, ecb_decrypt, xts_decrypt
 from .errors import FormatError, MissingKeyError, MissingTicketError, NxError, UnsupportedError
 from .io import Storage, u16, u32, u64
-from .keys import Keyset
-from .ticket import Ticket
+from .keys import ETICKET_KEY, Keyset
+from .ticket import TITLEKEY_COMMON, TITLEKEY_PERSONALIZED, Ticket
 
 HEADER_SIZE = 0xC00
 MEDIA_UNIT = 0x200
@@ -526,17 +526,22 @@ class Nca:
                         f"NCA uses rights ID {h.rights_id.hex()} but no matching ticket was "
                         "found (pass --ticket, or use the NSP/XCI that contains it)"
                     )
-                if ticket.is_personalized:
+                if ticket.title_key_type == TITLEKEY_PERSONALIZED:
+                    wrapped = self.keyset.unwrap_personalized_title_key(ticket.title_key_block)
+                elif ticket.title_key_type == TITLEKEY_COMMON:
+                    wrapped = ticket.encrypted_title_key
+                else:
                     raise UnsupportedError(
-                        "personalized ticket (title key bound to a console): only common "
-                        "tickets are supported"
+                        f"ticket with unknown title key type {ticket.title_key_type}"
                     )
-                title_key = ecb_decrypt(self.keyset.titlekek(rev), ticket.encrypted_title_key)
+                title_key = ecb_decrypt(self.keyset.titlekek(rev), wrapped)
                 self._keys = ContentKeys(xts=None, ctr=title_key)
             else:
                 plain = ecb_decrypt(self.keyset.key_area_key(rev, h.kaek_index), h.key_area)
                 self._keys = ContentKeys(xts=plain[:0x20], ctr=plain[0x20:0x30])
         except MissingKeyError as e:
+            if e.key_name == ETICKET_KEY:
+                raise
             raise MissingKeyError(
                 e.key_name,
                 f"this NCA uses key generation {h.key_generation}; "

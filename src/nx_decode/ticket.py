@@ -17,8 +17,9 @@ Offset  Size   Field
 0x160   0x10   rights ID
 ======  =====  =========================================
 
-Personalized tickets wrap the title key with the console's RSA key, which
-nx-decode cannot (and will not try to) obtain, so they are reported as unsupported.
+Personalized tickets wrap the title key with the console's eTicket RSA key; it is
+unwrapped with ``eticket_rsa_keypair`` from the owner's own keys file (see
+:meth:`nx_decode.keys.Keyset.unwrap_personalized_title_key`).
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ class Ticket:
 
     @property
     def is_personalized(self) -> bool:
-        return self.title_key_type != TITLEKEY_COMMON
+        return self.title_key_type == TITLEKEY_PERSONALIZED
 
     @property
     def encrypted_title_key(self) -> bytes:

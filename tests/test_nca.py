@@ -10,6 +10,7 @@ from builders import (
     build_pfs0,
     build_ticket,
     encrypt_title_key,
+    eticket_keypair,
     make_keys,
     make_rights_id,
     rand_key,
@@ -17,7 +18,7 @@ from builders import (
 
 from nx_decode.containers import PartitionFS
 from nx_decode.crypto import nintendo_tweak
-from nx_decode.errors import FormatError, MissingKeyError, NxError, UnsupportedError
+from nx_decode.errors import FormatError, KeysError, MissingKeyError, NxError, UnsupportedError
 from nx_decode.io import MemoryStorage
 from nx_decode.keys import Keyset
 from nx_decode.nca import Nca
@@ -167,16 +168,56 @@ def test_ticket_signature_types(sig_type: int, big_endian_sig: bool) -> None:
     assert (tik.rights_id, tik.encrypted_title_key, tik.master_key_revision) == (rid, tk, 3)
 
 
-def test_rights_id_without_ticket_or_personalized() -> None:
-    keys = make_keys()
-    rid = make_rights_id(0x0100000000001000, 0)
-    tk = rand_key()
+def rights_id_nca() -> tuple[dict[str, bytes], bytes, bytes, bytes]:
+    keys, rid, tk = make_keys(), make_rights_id(0x0100000000001000, 0), rand_key()
     blob = build_nca(keys, [SectionSpec("pfs0", exefs_payload()[0])], rights_id=rid, title_key=tk)
+    return keys, rid, encrypt_title_key(keys, 0, tk), blob
+
+
+def test_rights_id_without_ticket() -> None:
+    keys, _, _, blob = rights_id_nca()
     with pytest.raises(NxError, match="no matching ticket"):
         open_nca(blob, keys).sections[0].check_master_hash()
-    personal = parse_ticket(build_ticket(rid, os.urandom(16), personalized=True))
-    with pytest.raises(UnsupportedError, match="personalized"):
-        open_nca(blob, keys, tickets={rid: personal}).sections[0].check_master_hash()
+
+
+def test_personalized_ticket_unwraps_with_the_eticket_keypair() -> None:
+    keys, rid, wrapped, blob = rights_id_nca()
+    console, keypair = eticket_keypair()
+    tik = parse_ticket(build_ticket(rid, wrapped, personalized=True, eticket=console))
+    assert tik.is_personalized
+    with_key = keys | {"eticket_rsa_keypair": keypair}
+    assert open_nca(blob, with_key, tickets={rid: tik}).sections[0].check_master_hash()
+
+    with pytest.raises(MissingKeyError, match="eticket_rsa_keypair") as e:
+        open_nca(blob, keys, tickets={rid: tik}).sections[0].check_master_hash()
+    assert "personalized tickets" in str(e.value) and keypair.hex() not in str(e.value).lower()
+
+    _, other_console = eticket_keypair(1)
+    other = keys | {"eticket_rsa_keypair": other_console}
+    with pytest.raises(KeysError, match="another console"):
+        open_nca(blob, other, tickets={rid: tik}).sections[0].check_master_hash()
+
+
+def test_unknown_title_key_type_is_unsupported() -> None:
+    keys, rid, wrapped, blob = rights_id_nca()
+    raw = bytearray(build_ticket(rid, wrapped))
+    raw[0x140 + 0x141] = 2  # body starts at 0x140 for RSA-2048-SHA256 signatures
+    tik = parse_ticket(bytes(raw))
+    with pytest.raises(UnsupportedError, match="unknown title key type 2"):
+        open_nca(blob, keys, tickets={rid: tik}).sections[0].check_master_hash()
+
+
+@pytest.mark.parametrize("damage", ["ctr prefix", "short", "exponent", "not a keypair"])
+def test_malformed_eticket_keypair_is_refused(damage: str) -> None:
+    _, raw = eticket_keypair()
+    bad = {
+        "ctr prefix": os.urandom(0x10) + raw,  # PRODINFO layout, CTR not stripped
+        "short": raw[:0x200],
+        "exponent": raw[:0x200] + (3).to_bytes(4, "big") + raw[0x204:],
+        "not a keypair": os.urandom(0x100) + raw[0x100:],
+    }[damage]
+    with pytest.raises(KeysError, match="not a usable RSA-2048 keypair"):
+        Keyset({"eticket_rsa_keypair": bad}).unwrap_personalized_title_key(bytes(0x100))
 
 
 def test_bktr_and_unknown_hash_types_are_unsupported() -> None:

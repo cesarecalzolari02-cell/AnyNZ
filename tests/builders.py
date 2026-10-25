@@ -13,6 +13,8 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
@@ -382,6 +384,21 @@ TICKET_SIGNATURES = {
 }
 
 
+_ETICKET: list[rsa.RSAPrivateKey] = []
+
+
+def eticket_keypair(index: int = 0) -> tuple[rsa.RSAPrivateKey, bytes]:
+    """A random RSA-2048 "console" key and its ``eticket_rsa_keypair`` value
+    (D | N | E big-endian | padding, 0x230 bytes). Generated once per test session;
+    ``index`` 1 is a second console."""
+    while len(_ETICKET) <= index:
+        _ETICKET.append(rsa.generate_private_key(public_exponent=0x10001, key_size=2048))
+    key = _ETICKET[index]
+    numbers = key.private_numbers()
+    raw = numbers.d.to_bytes(0x100, "big") + numbers.public_numbers.n.to_bytes(0x100, "big")
+    return key, raw + (0x10001).to_bytes(4, "big") + bytes(0x2C)
+
+
 def build_ticket(
     rights_id: bytes,
     enc_title_key: bytes,
@@ -389,12 +406,21 @@ def build_ticket(
     big_endian_sig: bool = False,
     sig_type: int = 0x010004,
     master_key_revision: int = 0,
+    eticket: rsa.RSAPrivateKey | None = None,
 ) -> bytes:
+    """A ticket. Personalized with ``eticket``: the titlekek-wrapped title key is
+    RSA-2048-OAEP (SHA-256, empty label) encrypted for that console key."""
     sig_size, pad_size = TICKET_SIGNATURES[sig_type]
     sig = sig_type.to_bytes(4, "big" if big_endian_sig else "little")
     body = bytearray(0x180)
     body[0:0x1A] = b"Root-CA00000003-XS00000020"
-    body[0x40:0x50] = enc_title_key
+    if personalized and eticket is not None:
+        oaep = padding.OAEP(
+            mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None
+        )
+        body[0x40:0x140] = eticket.public_key().encrypt(enc_title_key, oaep)
+    else:
+        body[0x40:0x50] = enc_title_key
     body[0x140] = 2
     body[0x141] = 1 if personalized else 0
     body[0x145] = master_key_revision
@@ -632,7 +658,11 @@ def build_game(
     files = [(nca_name(blob), blob) for blob, _ in contents] + [(nca_name(meta, meta=True), meta)]
     if rights_id:
         assert rid is not None and title_key is not None
-        tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key), personalized=personalized)
+        eticket = None
+        if personalized:
+            eticket, keys["eticket_rsa_keypair"] = eticket_keypair()
+        enc_key = encrypt_title_key(keys, rev, title_key)
+        tik = build_ticket(rid, enc_key, personalized=personalized, eticket=eticket)
         files += ticket_files(rid, tik)
     return FakeGame(
         keys, files, title_id, name, "Test Publisher", tree, exefs, romfs_section_image(romfs)
@@ -690,11 +720,14 @@ def build_dlc(
     key_generation: int = 3,
     ext: bytes | None = None,
     title_id: int | None = None,
+    personalized: bool = False,
 ) -> FakeContent:
     """AddOnContent: a rights-ID Data NCA (RomFS), a Meta NCA and a common ticket.
 
     The title ID defaults to the usual ``(application ID + 0x1000) + index`` scheme;
     pass ``title_id`` to break it (the CNMT's ApplicationId is what counts).
+    ``personalized`` uses a personalized ticket for the fake console of
+    :func:`eticket_keypair` (put its keypair in ``keys`` to decrypt it).
     """
     rev = max(key_generation - 1, 0)
     tid = title_id if title_id is not None else application_id + 0x1000 + index
@@ -711,7 +744,9 @@ def build_dlc(
     )
     ext = cnmt_ext(0x82, application_id=application_id) if ext is None else ext
     meta = build_meta_nca(keys, tid, version, 0x82, [(data, 2)], ext, key_generation)
-    tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key))
+    eticket = eticket_keypair()[0] if personalized else None
+    enc_key = encrypt_title_key(keys, rev, title_key)
+    tik = build_ticket(rid, enc_key, personalized=personalized, eticket=eticket)
     files = [(nca_name(data), data), (nca_name(meta, meta=True), meta), *ticket_files(rid, tik)]
     return FakeContent(files, tid, version, application_id, tree)
 

@@ -13,6 +13,7 @@ from builders import (
     build_patch,
     build_pfs0,
     build_xci,
+    eticket_keypair,
     make_keys,
     write_keys_file,
 )
@@ -90,9 +91,42 @@ def test_info_without_keys_or_with_personalized_ticket(tmp_path, capsys, monkeyp
     assert "keys file not found" in captured.err
     assert "missing key: header_key" in captured.out
 
-    _, nsp, keys = game_nsp(tmp_path, rights_id=True, personalized=True)
+
+def test_personalized_ticket_with_and_without_the_eticket_keypair(tmp_path, capsys) -> None:
+    game, nsp, keys = game_nsp(tmp_path, rights_id=True, personalized=True)
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 0
+    out = capsys.readouterr().out
+    assert "Tickets:  1 (personalized)" in out and out.count("decrypts with your keys: yes") == 3
+    out_dir = tmp_path / "out"
+    assert main(["nca-extract", "--keys", str(keys), str(nsp), "-o", str(out_dir)]) == 0
+    program = game.files[0][0].split(".")[0]
+    assert (out_dir / program / "section1_romfs" / "readme.txt").exists()
+    for value in game.keys.values():
+        assert value.hex() not in (out + capsys.readouterr().out).lower()
+
+    without = {k: v for k, v in game.keys.items() if k != "eticket_rsa_keypair"}
+    keys = write_keys_file(tmp_path / "no-eticket.keys", without)
     assert main(["info", "--keys", str(keys), str(nsp)]) == 1
-    assert "personalized ticket" in capsys.readouterr().out
+    assert "missing key: eticket_rsa_keypair (needed for personalized tickets" in (
+        capsys.readouterr().out
+    )
+
+
+def test_dlc_with_personalized_ticket(tmp_path, capsys) -> None:
+    game = build_game()
+    dlc = build_dlc(game.keys, game.title_id, personalized=True)
+    nsp = tmp_path / "dlc.nsp"
+    nsp.write_bytes(build_pfs0(dlc.files))
+    keys = write_keys_file(
+        tmp_path / "k.keys", game.keys | {"eticket_rsa_keypair": eticket_keypair()[1]}
+    )
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 0
+    assert "Tickets:  1 (personalized)" in capsys.readouterr().out
+    dest = tmp_path / "out"
+    assert main(["nca-extract", "--keys", str(keys), str(nsp), "-o", str(dest)]) == 0
+    assert dlc.romfs_tree is not None
+    item = dest / dlc.files[0][0].split(".")[0] / "section0_romfs" / "dlc" / "item1.bin"
+    assert item.read_bytes() == dlc.romfs_tree["dlc"]["item1.bin"]
 
 
 def test_info_reports_unknown_key_generation(tmp_path, capsys) -> None:
