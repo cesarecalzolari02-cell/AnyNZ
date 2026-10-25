@@ -23,7 +23,7 @@ patches or signs anything.
   and personalized tickets stay unsupported.
 - [x] **Dev setup for working without a console.** `DEVELOPMENT.md`,
   `scripts/demo.py` (all commands on a synthetic library), CI on Windows too.
-- [ ] **GitHub readiness and hardening** (before real files):
+- [x] **GitHub readiness and hardening** (before real files):
   - [x] Packaging: SPDX `license` + `license-files` (setuptools 77+; the table
     form stops building after 2027-02-18), Python 3.10-3.14 classifiers.
   - [x] CI: Python 3.14, current action versions, a `package` job (build sdist and
@@ -37,8 +37,8 @@ patches or signs anything.
     tables, non-ASCII output on Windows legacy code pages, a seeded corruption test
     that runs every command and accepts only clean errors.
   - [x] Docs: `CHANGELOG.md`, publishing steps (private repo) in `DEVELOPMENT.md`.
-  - [ ] Owner: create the private GitHub repo and push. `origin` is still the local
-    bundle, which stops at Phase 4.
+  - [x] Owner: private GitHub repository created; `main` pushed with CI passing.
+    The old local bundle remote is now called `bundle`.
 
 Next (not started):
 
