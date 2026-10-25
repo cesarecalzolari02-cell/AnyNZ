@@ -127,6 +127,37 @@ def make_keys(revisions: tuple[int, ...] = (0,)) -> dict[str, bytes]:
     return keys
 
 
+# Bucket trees as Switchbrew's NCA page lays them out: an offset node, then full
+# 0x4000-byte entry sets (the last one may be partial).
+
+
+def bucket_header(entry_count: int) -> bytes:
+    return b"BKTR" + struct.pack("<III", 1, entry_count, 0)
+
+
+def indirect_entry(virtual: int, physical: int, storage: int) -> bytes:
+    """Relocation entry: storage 0 is the base game, 1 the update's patch data."""
+    return struct.pack("<QQI", virtual, physical, storage)
+
+
+def aes_ctr_ex_entry(offset: int, generation: int, encrypted: bool = True) -> bytes:
+    return struct.pack("<QB3xI", offset, 0 if encrypted else 1, generation)
+
+
+def build_bucket_tree(entries: list[bytes], end_offset: int) -> bytes:
+    per_set = (0x4000 - 0x10) // len(entries[0])
+    sets = [entries[i : i + per_set] for i in range(0, len(entries), per_set)]
+    starts = [struct.unpack_from("<Q", s[0])[0] for s in sets]
+    offset_node = struct.pack("<IIQ", 0, len(sets), end_offset)
+    offset_node += struct.pack(f"<{len(starts)}Q", *starts)
+    nodes = [offset_node.ljust(0x4000, b"\0")]
+    for i, entry_set in enumerate(sets):
+        set_end = starts[i + 1] if i + 1 < len(sets) else end_offset
+        node = struct.pack("<IIQ", i, len(entry_set), set_end) + b"".join(entry_set)
+        nodes.append(node.ljust(0x4000, b"\0"))
+    return b"".join(nodes)
+
+
 @dataclass
 class SectionSpec:
     kind: str  # "pfs0" or "romfs"
