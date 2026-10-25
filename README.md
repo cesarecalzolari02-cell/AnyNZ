@@ -1,4 +1,7 @@
-# nx-decode
+# AnyNZ
+a project aimed at mimicking the famous project "AnyPS5" and extending it to the famous console by nintendo the "Switch". we do use llm's and such and we condone their use for development. this is a heavy work in progress. WE DO NOT CONDONE PIRACY AND DO NOT PROVIDE GAMES, KEYS OR SUCH THINGS
+
+## nx-decode
 
 A small command-line tool that reads and decrypts Nintendo Switch **XCI** and
 **NSP** container files (and the **NCA** files inside them) that you own, using
@@ -11,7 +14,7 @@ a file, checks its integrity and extracts its contents.
 > It does not patch, sign, re-encrypt or bypass anything. Personalized
 > (console-bound) tickets are deliberately not supported.
 
-## Install
+### Install
 
 Requires Python 3.10 or newer. CI tests 3.10, 3.12 and 3.14 on Linux and Windows.
 
@@ -25,7 +28,7 @@ pip install .
 
 The only runtime dependency is [`cryptography`](https://cryptography.io).
 
-## Keys
+### Keys
 
 nx-decode reads a hactool-style keys file: one `name = hexvalue` per line,
 `#` for comments. It is looked up in this order:
@@ -44,7 +47,7 @@ Error messages name missing keys (for example `missing key:
 key_area_key_application_10 (... key generation 17; your keys may be older than
 this title)`) but never print key values.
 
-## Usage
+### Usage
 
 ```sh
 nx-decode info    game.nsp                 # title ID, version, name, publisher, NCA status
@@ -81,7 +84,7 @@ unreadable or compressed files are errors (exit status 1).
 All reads are streamed in 1 MiB chunks, so multi-gigabyte XCIs are never loaded
 into memory.
 
-## Supported
+### Supported
 
 | Area | Supported |
 | --- | --- |
@@ -97,7 +100,7 @@ into memory.
 | Updates (Patch) | listed and grouped by `titles` and `info`; their BKTR sections are **not** decrypted (see below) |
 | Verify | content ID = SHA-256[:16], CNMT hash and size, FS-header hashes, master hashes, full hash tables, XCI root/partition HFS0 hashes |
 
-## Not supported (reported clearly, never a crash)
+### Not supported (reported clearly, never a crash)
 
 | Feature | What you get |
 | --- | --- |
@@ -111,7 +114,7 @@ into memory.
 Out of scope: downloading anything, hosting or distributing keys, patching,
 signing, re-packing, or bypassing online checks.
 
-## Specification sources
+### Specification sources
 
 The layouts were first taken from the open-source reference implementations
 hactool (ISC) and libnintendo-hac / libnintendo-es (MIT, used by nstool),
@@ -154,7 +157,7 @@ The three details that were previously unconfirmed:
   CardKeyArea precedes the card header on the card and is hidden from raw reads,
   so `HEAD` is at 0x100 in a normal dump and 0x1100 with the key area.
 
-## Testing on your own files
+### Testing on your own files
 
 ```sh
 python scripts/smoke.py ~/.switch/prod.keys /path/to/game.xci            # info, list, quick verify
@@ -166,7 +169,7 @@ directory outside the repository and deletes it afterwards. Output contains
 title IDs and file names but never key values. Please don't paste anything
 else from your keys file when reporting issues.
 
-## Development
+### Development
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for setup on Windows and Linux/macOS, the
 module layout, conventions, and what still needs checking on real files.
@@ -189,7 +192,7 @@ contains a keys-file-like line (`name = <32 or 64 hex digits>`), any Switch
 container (by magic bytes), any `.keys/.xci/.nsp/.nca/.tik/.cert/...` file and
 any archive (`.rar/.7z/.zip`). It reads only the first 4 MiB of each file.
 
-## License
+### License
 
 MIT, see [LICENSE](LICENSE). "Nintendo Switch" is a trademark of Nintendo. This
 project is not affiliated with or endorsed by Nintendo.
