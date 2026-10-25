@@ -1,29 +1,40 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nx-decode"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Read and decrypt Nintendo Switch XCI/NSP/NCA files you own, with your own keys."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["cryptography>=41"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Environment :: Console",
+    "Operating System :: OS Independent",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.5"]
+# ruff is pinned to one minor version: its formatter style changes between them.
+dev = ["pytest>=7", "ruff>=0.17.2,<0.18"]
 
 [project.scripts]
 nx-decode = "nx_decode.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "nx_decode.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

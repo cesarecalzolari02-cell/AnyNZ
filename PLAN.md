@@ -23,6 +23,22 @@ patches or signs anything.
   and personalized tickets stay unsupported.
 - [x] **Dev setup for working without a console.** `DEVELOPMENT.md`,
   `scripts/demo.py` (all commands on a synthetic library), CI on Windows too.
+- [ ] **GitHub readiness and hardening** (before real files):
+  - [x] Packaging: SPDX `license` + `license-files` (setuptools 77+; the table
+    form stops building after 2027-02-18), Python 3.10-3.14 classifiers.
+  - [x] CI: Python 3.14, current action versions, a `package` job (build sdist and
+    wheel, forbidden-file check on the sdist, install the wheel, run it).
+  - [ ] Repo hygiene: `.gitattributes` (the shell hook keeps LF on Windows
+    checkouts with `core.autocrlf`), `check_forbidden.py` reads only the start of
+    each file or staged blob, an issue template that says never to attach keys or
+    game files.
+  - [ ] Hardening: sanity limits on hash-layout fields (a corrupt IVFC block size
+    must not allocate gigabytes), stream XCI HFS0 entry hashes and verify's hash
+    tables, non-ASCII output on Windows legacy code pages, a seeded corruption test
+    that runs every command and accepts only clean errors.
+  - [ ] Docs: `CHANGELOG.md`, publishing steps (private repo) in `DEVELOPMENT.md`.
+  - [ ] Owner: create the private GitHub repo and push. `origin` is still the local
+    bundle, which stops at Phase 4.
 
 Next (not started):
 

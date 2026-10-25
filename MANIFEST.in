@@ -1,0 +1,5 @@
+# The sdist carries everything needed to run the test suite; CI checks it for
+# forbidden files like the repository itself.
+include CHANGELOG.md DEVELOPMENT.md
+recursive-include tests *.py
+recursive-include scripts *.py

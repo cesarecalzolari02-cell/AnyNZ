@@ -7,11 +7,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   forbidden-files:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: No keys or Switch containers in the repo
         run: python3 scripts/check_forbidden.py --all
 
@@ -21,13 +25,44 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.12", "3.13"]
+        python-version: ["3.10", "3.12", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip build
+      - name: Build sdist and wheel without setuptools deprecation warnings
+        run: |
+          python -m build > build.log 2>&1 || { cat build.log; exit 1; }
+          if grep -n "DeprecationWarning" build.log; then exit 1; fi
+      - name: No keys or Switch containers in the packages
+        run: |
+          mkdir unpacked
+          tar xzf dist/*.tar.gz -C unpacked
+          python -m zipfile -e dist/*.whl unpacked/wheel
+          find unpacked -type f -print0 | xargs -0 python scripts/check_forbidden.py
+      - name: Install the wheel in a clean venv and run it
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install dist/*.whl
+          /tmp/venv/bin/nx-decode --version
+          /tmp/venv/bin/python -m nx_decode --help
+      - name: Run the test suite from the sdist
+        run: |
+          /tmp/venv/bin/pip install pytest
+          cd unpacked/nx_decode-*/
+          /tmp/venv/bin/python -m pytest -q

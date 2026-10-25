@@ -5,6 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 from builders import build_hfs0, build_pfs0, build_xci, rand_key
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +58,7 @@ def test_staged_mode_blocks_commit(tmp_path) -> None:
     assert b"titlekek_00 =" not in run.stderr
 
 
+@pytest.mark.skipif(not (ROOT / ".git").exists(), reason="not a git checkout (e.g. an sdist)")
 def test_repository_is_clean() -> None:
     run = subprocess.run(["python3", str(SCRIPT), "--all"], cwd=ROOT, capture_output=True)
     assert run.returncode == 0, run.stderr.decode()
