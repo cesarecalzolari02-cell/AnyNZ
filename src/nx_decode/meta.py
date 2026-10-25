@@ -1,7 +1,8 @@
 """Content metadata (CNMT) and application control properties (NACP).
 
 * CNMT, the ``*.cnmt`` file in a Meta NCA's PFS0 section.
-  Spec: https://switchbrew.org/wiki/CNMT (header, 0x38-byte content record,
+  Spec: https://switchbrew.org/wiki/CNMT (header, 0x38-byte content record with
+  its content type at 0x36 and ID offset at 0x37,
   0x10-byte content meta record, the per-type extended headers),
   https://switchbrew.org/wiki/NCM_services (ContentMetaType, ContentType).
   Reference: libnintendo-hac ``cnmt.h`` (file order: header, extended header,
@@ -73,6 +74,7 @@ class ContentRecord:
     content_id: bytes  # first 16 bytes of that hash; the NCA's file name
     size: int
     type: int
+    id_offset: int = 0  # which program of a multi-program application
 
     @property
     def type_name(self) -> str:
@@ -125,7 +127,7 @@ def parse_cnmt(data: bytes) -> Cnmt:
         r = data[base + i * 0x38 : base + (i + 1) * 0x38]
         # 15.0.0+: 5-byte size, then ContentAttributes at 0x35 (older CNMTs leave it 0).
         size = u32(r, 0x30) | (r[0x34] << 32)
-        records.append(ContentRecord(r[:0x20], r[0x20:0x30], size, r[0x36]))
+        records.append(ContentRecord(r[:0x20], r[0x20:0x30], size, r[0x36], r[0x37]))
     meta_infos = []
     for i in range(meta_count):
         off = metas_at + i * CONTENT_META_INFO_SIZE

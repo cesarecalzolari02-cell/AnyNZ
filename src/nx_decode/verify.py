@@ -31,7 +31,7 @@ from .io import CHUNK, Storage
 from .keys import Keyset
 from .meta import ContentRecord
 from .nca import HASH_IVFC, HASH_SHA256, Nca, Section
-from .title import inspect
+from .title import TitleReport, inspect
 
 CONTENT_ID = re.compile(r"^([0-9a-fA-F]{32})(?:\.cnmt)?\.nca$")
 
@@ -147,11 +147,18 @@ def content_id_checks(
         yield Check(f.path, "CNMT size", f.size == record.size)
 
 
-def verify_container(c: Container, keyset: Keyset | None, quick: bool = False) -> list[Check]:
+def verify_container(
+    c: Container,
+    keyset: Keyset | None,
+    quick: bool = False,
+    report: TitleReport | None = None,
+) -> list[Check]:
+    """All checks for ``c``. Pass ``report`` to reuse an inspection (e.g. paired with
+    a base game, so an update's patched sections are checked too)."""
     checks: list[Check] = []
     if c.kind == "XCI":
         checks.extend(xci_checks(c))
-    report = inspect(c, keyset)
+    report = report or inspect(c, keyset)
     records = {r.content_id: r for m in report.metas for r in m.contents}
     for rep in report.ncas:
         m = CONTENT_ID.match(rep.file.name)

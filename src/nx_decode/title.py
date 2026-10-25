@@ -62,14 +62,22 @@ def load_tickets(files: list[ContainerFile], notes: list[str]) -> dict[bytes, Ti
     return tickets
 
 
-def probe_nca(f: ContainerFile, keyset: Keyset | None, tickets: dict[bytes, Ticket]) -> NcaReport:
-    """Open one NCA and check that every supported section decrypts (master hashes match)."""
+def probe_nca(
+    f: ContainerFile,
+    keyset: Keyset | None,
+    tickets: dict[bytes, Ticket],
+    base: Nca | None = None,
+) -> NcaReport:
+    """Open one NCA and check that every supported section decrypts (master hashes match).
+
+    ``base`` is the base game's NCA, for an update NCA with BKTR sections.
+    """
     rep = NcaReport(f)
     if f.name.lower().endswith(".ncz") or is_ncz(f.storage):
         rep.problem = "NCZ (compressed NCA): not supported, decompress first"
         return rep
     try:
-        rep.nca = Nca(f.storage, keyset, tickets, name=f.name)
+        rep.nca = Nca(f.storage, keyset, tickets, name=f.name, base=base)
         checked = 0
         for s in rep.nca.sections:
             if reason := s.unsupported_reason():

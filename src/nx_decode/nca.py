@@ -40,6 +40,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 
+from .bktr import (
+    AES_CTR_EX_ENTRY_SIZE,
+    INDIRECT_ENTRY_SIZE,
+    AesCtrExStorage,
+    IndirectStorage,
+    TableInfo,
+    read_bucket_tree,
+)
 from .crypto import SECTOR, ctr_crypt, ecb_decrypt, xts_decrypt
 from .errors import FormatError, MissingKeyError, MissingTicketError, NxError, UnsupportedError
 from .io import Storage, u16, u32, u64
@@ -143,6 +151,11 @@ class FsHeader:
     def has_patch_info(self) -> bool:
         # Indirect (relocation) table size and AesCtrEx table size.
         return u64(self.raw, 0x108) != 0 or u64(self.raw, 0x128) != 0
+
+    @property
+    def is_patch(self) -> bool:
+        """An update's BKTR section: AES-CTR-EX encryption or a PatchInfo."""
+        return self.encryption_type in (ENC_CTR_EX, ENC_CTR_EX_SKIP) or self.has_patch_info
 
     @property
     def has_sparse_info(self) -> bool:
@@ -315,8 +328,8 @@ class Section:
     def unsupported_reason(self) -> str | None:
         """Why this section cannot be decoded, or ``None`` if it can."""
         fs = self.fs
-        if fs.encryption_type in (ENC_CTR_EX, ENC_CTR_EX_SKIP) or fs.has_patch_info:
-            return "BKTR patch section (update/patch NCA): needs the base game, not supported"
+        if fs.is_patch and (reason := self._patch_reason()):
+            return reason
         if fs.has_sparse_info:
             return "sparse storage section: not supported"
         if fs.has_compression_info:
@@ -327,7 +340,8 @@ class Section:
             return "AES-CTR skip-layer-hash section (14.0.0+): not supported"
         if fs.fs_type not in (FS_PFS0, FS_ROMFS):
             return f"unknown section format type {fs.fs_type}"
-        if fs.encryption_type not in (ENC_NONE, ENC_XTS, ENC_CTR) and not self.nca.plaintext:
+        known = (ENC_CTR_EX,) if fs.is_patch else (ENC_NONE, ENC_XTS, ENC_CTR)
+        if fs.encryption_type not in known and not self.nca.plaintext:
             return f"unknown encryption type {fs.encryption_type}"
         if fs.hash_type in HASH_SHA3:
             return f"unsupported hash type {fs.hash_type} ({HASH_NAMES[fs.hash_type]}, 14.0.0+)"
@@ -337,13 +351,34 @@ class Section:
             return "AES-XTS section with a rights ID: not supported"
         return None
 
+    def _patch_reason(self) -> str | None:
+        fs = self.fs
+        if fs.encryption_type == ENC_CTR_EX_SKIP:
+            return "BKTR patch section with skip-layer-hash encryption (14.0.0+): not supported"
+        if fs.fs_type != FS_ROMFS:
+            return "BKTR patch section that is not a RomFS: not supported"
+        base = self.nca.base
+        if base is None:
+            return "BKTR patch section (update/patch NCA): needs the base game (pass --base)"
+        try:
+            base_section = base.section(self.index)
+        except NxError:
+            return f"the base game's NCA has no section {self.index} to patch"
+        if base_section.kind != "RomFS":
+            return f"the base game's section {self.index} is not a RomFS"
+        if reason := base_section.unsupported_reason():
+            return f"the base game's section {self.index}: {reason}"
+        return None
+
     def check_supported(self) -> None:
         if reason := self.unsupported_reason():
             raise UnsupportedError(f"section {self.index}: {reason}")
 
-    def storage(self) -> DecryptedSection:
-        """The whole section, decrypted (including hash tables)."""
+    def storage(self) -> Storage:
+        """The whole section, decrypted (including hash tables); patched for BKTR."""
         self.check_supported()
+        if self.fs.is_patch:
+            return self._patched
         keys = (
             None
             if self.nca.plaintext or self.fs.encryption_type == ENC_NONE
@@ -352,6 +387,31 @@ class Section:
         mode = ENC_NONE if self.nca.plaintext else self.fs.encryption_type
         return DecryptedSection(
             self.nca.storage, self.offset, self.size, mode, keys, self.fs.ctr_upper
+        )
+
+    @cached_property
+    def _patched(self) -> IndirectStorage:
+        """Base game section + this update's patch data, combined per the BKTR tables."""
+        assert self.nca.base is not None
+        keys = None if self.nca.plaintext else self.nca.content_keys()
+        # Both tables use the section's normal AES-CTR counter. Reference: hactool,
+        # nxdumptool (Switchbrew: "the BKTR entries use normal crypto").
+        tables = DecryptedSection(
+            self.nca.storage, self.offset, self.size, ENC_CTR, keys, self.fs.ctr_upper
+        )
+        info = self.fs.raw[0x100:0x140]
+        relocation = TableInfo.parse(info[:0x20], "relocation")
+        subsection = TableInfo.parse(info[0x20:], "subsection")
+        patch = AesCtrExStorage(
+            self.nca.storage.slice(self.offset, self.size),
+            self.offset,
+            None if keys is None else keys.ctr,
+            self.fs.ctr_upper[:4],  # SecureValue; the generation comes from each entry
+            read_bucket_tree(tables, subsection, AES_CTR_EX_ENTRY_SIZE, "subsection"),
+        )
+        base = self.nca.base.section(self.index).storage()
+        return IndirectStorage(
+            base, patch, read_bucket_tree(tables, relocation, INDIRECT_ENTRY_SIZE, "relocation")
         )
 
     @cached_property
@@ -414,7 +474,11 @@ class Section:
 
 
 class Nca:
-    """An opened NCA. Tickets are only needed for rights-ID (titlekey) NCAs."""
+    """An opened NCA. Tickets are only needed for rights-ID (titlekey) NCAs.
+
+    ``base`` is the base game's NCA of the same content type, for an update NCA
+    whose BKTR sections read from it.
+    """
 
     def __init__(
         self,
@@ -422,11 +486,13 @@ class Nca:
         keyset: Keyset | None,
         tickets: Mapping[bytes, Ticket] | None = None,
         name: str = "",
+        base: Nca | None = None,
     ) -> None:
         self.storage = storage
         self.keyset = keyset
         self.tickets = dict(tickets or {})
         self.name = name
+        self.base = base
         raw = storage.read_at(0, HEADER_SIZE) if storage.size >= HEADER_SIZE else b""
         plain, self.plaintext = decrypt_header(raw, keyset)
         self.header = NcaHeader(plain)

@@ -6,6 +6,7 @@ generated keys. No real keys or Nintendo data are used or stored.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import os
 import struct
@@ -159,13 +160,84 @@ def build_bucket_tree(entries: list[bytes], end_offset: int) -> bytes:
 
 
 @dataclass
+class BktrSpec:
+    """Make a RomFS section an update's BKTR section, patching ``base_section``.
+
+    The section payload is the *patched* RomFS. Blocks of the patched image that
+    also occur in the base section are relocated there; the rest becomes patch
+    data, split into subsections with ``generations``, then an unencrypted one if
+    ``plain_tail``. Tables and subsection counters follow hactool/nxdumptool.
+    """
+
+    base_section: bytes  # the base game's plaintext section image
+    generations: tuple[int, ...] = (1, 2)
+    plain_tail: bool = True
+    block: int = 0x200
+
+
+def _bktr_section(
+    spec: BktrSpec, virtual: bytes, fs: bytearray, start: int, key: bytes | None
+) -> bytes:
+    """Fill PatchInfo in ``fs``; return the physical section (patch data and tables)."""
+    where: dict[bytes, int] = {}
+    for off in range(0, len(spec.base_section) - spec.block + 1, spec.block):
+        where.setdefault(spec.base_section[off : off + spec.block], off)
+    relocations: list[tuple[int, int, int]] = []  # (virtual, physical, storage)
+    patch = bytearray()
+    for off in range(0, len(virtual), spec.block):
+        piece = virtual[off : off + spec.block]
+        found = where.get(piece)
+        storage, phys = (0, found) if found is not None else (1, len(patch))
+        if storage:
+            patch += piece
+        if relocations:
+            v, p, st = relocations[-1]
+            if st == storage and p + off - v == phys:
+                continue  # extends the previous entry
+        relocations.append((off, phys, storage))
+    assert patch, "the patched image must differ from the base"
+
+    parts = len(spec.generations) + spec.plain_tail
+    step = _align(max(len(patch) // parts, 0x10), 0x10)
+    subsections = [(i * step, gen, True) for i, gen in enumerate(spec.generations)]
+    if spec.plain_tail:
+        subsections.append((len(spec.generations) * step, 0, False))
+    subsections = [sub for sub in subsections if sub[0] < len(patch)]
+
+    indirect_off = len(patch)
+    indirect = build_bucket_tree([indirect_entry(*r) for r in relocations], len(virtual))
+    aes_off = indirect_off + len(indirect)
+    aes = build_bucket_tree([aes_ctr_ex_entry(*sub) for sub in subsections], len(patch))
+    fs[0x100:0x140] = (
+        struct.pack("<QQ", indirect_off, len(indirect))
+        + bucket_header(len(relocations))
+        + struct.pack("<QQ", aes_off, len(aes))
+        + bucket_header(len(subsections))
+    )
+    if key is None:
+        image = bytes(patch) + indirect + aes
+    else:
+        upper = bytes(fs[0x140:0x148])[::-1]  # SecureValue | Generation, big-endian
+        image = b""
+        for i, (off, gen, encrypted) in enumerate(subsections):
+            end = subsections[i + 1][0] if i + 1 < len(subsections) else len(patch)
+            chunk = bytes(patch[off:end])
+            counter = upper[:4] + gen.to_bytes(4, "big")
+            image += _ctr_enc(key, counter, start + off, chunk) if encrypted else chunk
+        image += _ctr_enc(key, upper, start + indirect_off, indirect)
+        image += _ctr_enc(key, upper, start + aes_off, aes)
+    return image.ljust(_align(len(image), 0x200), b"\0")
+
+
+@dataclass
 class SectionSpec:
     kind: str  # "pfs0" or "romfs"
     payload: bytes
     crypto: str = "ctr"  # "ctr", "xts" or "none"
     block_size: int = 0x1000  # HierarchicalSha256 block size
     ivfc_block_log2: int = 9
-    patch: bool = False  # mark as a BKTR patch section
+    patch: bool = False  # mark as a BKTR patch section (fake tables)
+    bktr: BktrSpec | None = None  # a real BKTR section patching a base game section
     hash_type: int | None = None  # override
     enc_type: int | None = None  # override the FS header's encryption type byte
     fs_bytes: dict[int, bytes] = field(default_factory=dict)  # raw FS header overrides
@@ -240,7 +312,7 @@ def build_nca(
         image = image.ljust(_align(len(image), 0x200), b"\0")
         start = 0xC00 + len(body)
         enc_type = {"none": 1, "xts": 2, "ctr": 3}[spec.crypto]
-        if spec.patch:
+        if spec.patch or spec.bktr:
             enc_type = 4
         if spec.enc_type is not None:
             enc_type = spec.enc_type
@@ -248,12 +320,14 @@ def build_nca(
         struct.pack_into("<HBBB", fs, 0, 2, fs_type, hash_type, enc_type)
         fs[0x8:0x100] = info
         fs[0x140:0x148] = spec.secure_value
+        if spec.bktr is not None:
+            image = _bktr_section(spec.bktr, image, fs, start, None if plaintext else ctr_key)
         for off, value in spec.fs_bytes.items():
             fs[off : off + len(value)] = value
         if spec.patch:
             struct.pack_into("<QQ", fs, 0x100, len(image) // 2, 0x100)
             struct.pack_into("<QQ", fs, 0x120, len(image) // 2 + 0x100, 0x100)
-        if not plaintext:
+        if not plaintext and spec.bktr is None:
             if spec.crypto == "ctr":
                 image = _ctr_enc(ctr_key, bytes(fs[0x140:0x148])[::-1], start, image)
             elif spec.crypto == "xts":
@@ -489,6 +563,13 @@ class FakeGame:
     publisher: str
     romfs_tree: Tree
     exefs_files: list[tuple[str, bytes]]
+    romfs_section: bytes = b""  # the Program NCA's plaintext RomFS section image
+
+
+def romfs_section_image(payload: bytes, block_log2: int = 9) -> bytes:
+    """The plaintext section image build_nca makes for a RomFS payload."""
+    image, _ = ivfc_image(payload, block_log2)
+    return image.ljust(_align(len(image), 0x200), b"\0")
 
 
 def build_game(
@@ -498,13 +579,17 @@ def build_game(
     personalized: bool = False,
     name: str = "Test Game",
     plaintext: bool = False,
+    manual: bool = False,
+    keys: dict[str, bytes] | None = None,
 ) -> FakeGame:
     """A minimal application: Program (ExeFS + RomFS), Control (NACP) and Meta NCAs.
 
     ``plaintext`` leaves every NCA unencrypted, so corruption tests reach the parsers.
+    ``manual`` adds an HtmlDocument (Manual) NCA, content an update usually keeps.
+    ``keys`` reuses another fake game's keys (default: new random keys).
     """
     rev = max(key_generation - 1, 0)
-    keys = make_keys(revisions=(rev,))
+    keys = keys or make_keys(revisions=(rev,))
     title_key = rand_key() if rights_id else None
     rid = make_rights_id(title_id, rev) if rights_id else None
     kw = {
@@ -517,12 +602,18 @@ def build_game(
 
     exefs = [("main", os.urandom(0x1800)), ("main.npdm", os.urandom(0x200)), ("rtld", b"r" * 99)]
     tree: Tree = {
-        "data": {"level1.bin": os.urandom(0x2100), "empty": b"", "sub": {"deep.txt": b"hi\n"}},
+        "data": {
+            "level1.bin": os.urandom(0x2100),
+            "empty": b"",
+            "sub": {"deep.txt": b"hi\n"},
+            "level2.bin": os.urandom(0x1800),
+        },
         "readme.txt": b"synthetic test data\n",
     }
+    romfs = build_romfs(tree)
     program = build_nca(
         keys,
-        [SectionSpec("pfs0", build_pfs0(exefs)), SectionSpec("romfs", build_romfs(tree))],
+        [SectionSpec("pfs0", build_pfs0(exefs)), SectionSpec("romfs", romfs)],
         content_type=0,
         **kw,
     )
@@ -531,20 +622,21 @@ def build_game(
         keys, [SectionSpec("romfs", build_romfs({"control.nacp": nacp}))], content_type=2, **kw
     )
     contents = [(program, 1), (control, 3)]
+    if manual:
+        html = build_romfs({"html-document": {"index.html": b"<p>manual</p>\n"}})
+        contents.append((build_nca(keys, [SectionSpec("romfs", html)], content_type=3, **kw), 4))
     ext = cnmt_ext(0x80, patch_id=title_id + 0x800)
     meta = build_meta_nca(
         keys, title_id, 0, 0x80, contents, ext, key_generation, plaintext=plaintext
     )
-    files = [
-        (nca_name(program), program),
-        (nca_name(control), control),
-        (nca_name(meta, meta=True), meta),
-    ]
+    files = [(nca_name(blob), blob) for blob, _ in contents] + [(nca_name(meta, meta=True), meta)]
     if rights_id:
         assert rid is not None and title_key is not None
         tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key), personalized=personalized)
         files += ticket_files(rid, tik)
-    return FakeGame(keys, files, title_id, name, "Test Publisher", tree, exefs)
+    return FakeGame(
+        keys, files, title_id, name, "Test Publisher", tree, exefs, romfs_section_image(romfs)
+    )
 
 
 META_NAMES = {0x80: "Application", 0x81: "Patch", 0x82: "AddOnContent", 0x83: "Delta"}
@@ -587,6 +679,7 @@ class FakeContent:
     version: int
     application_id: int
     romfs_tree: Tree | None = None
+    exefs_files: list[tuple[str, bytes]] | None = None
 
 
 def build_dlc(
@@ -623,27 +716,64 @@ def build_dlc(
     return FakeContent(files, tid, version, application_id, tree)
 
 
+def patched_tree(base: Tree) -> Tree:
+    """The base RomFS after an update: a 0x200-byte file added in front (so the
+    unchanged data behind it moves), one file changed in place, a new folder."""
+    tree: Tree = {"added-first.bin": os.urandom(0x200), **copy.deepcopy(base)}
+    tree["data"]["sub"]["deep.txt"] = b"HI\n"
+    tree["readme.txt"] = b"patched test data, longer than before\n"
+    tree["new"] = {"extra.txt": b"new in the update\n"}
+    return tree
+
+
 def build_patch(
-    keys: dict[str, bytes], application_id: int, version: int = 0x10000, key_generation: int = 3
+    keys: dict[str, bytes],
+    application_id: int,
+    version: int = 0x10000,
+    key_generation: int = 3,
+    base: FakeGame | None = None,
+    plaintext: bool = False,
 ) -> FakeContent:
-    """A Patch: a rights-ID Program NCA with a BKTR RomFS section, plus its Meta NCA."""
+    """A Patch: a rights-ID Program NCA with a BKTR RomFS section, plus its Meta NCA.
+
+    Without ``base`` the BKTR section is random bytes with fake tables, enough to be
+    recognised as a patch. With ``base`` it is a real BKTR section against the base
+    game's RomFS; the update also brings a new ExeFS and its own Control NCA, and
+    ``romfs_tree`` is what the patched RomFS must contain.
+    """
     rev = max(key_generation - 1, 0)
     tid = application_id + 0x800
     title_key, rid = rand_key(), make_rights_id(tid, rev)
-    program = build_nca(
-        keys,
-        [
+    kw = {
+        "key_generation": key_generation,
+        "title_id": tid,
+        "rights_id": rid,
+        "title_key": title_key,
+        "plaintext": plaintext,
+    }
+    tree = exefs = None
+    if base is None:
+        sections = [
             SectionSpec("pfs0", build_pfs0([("main", os.urandom(0x400))])),
             SectionSpec("romfs", os.urandom(0x1000), patch=True),
-        ],
-        content_type=0,
-        key_generation=key_generation,
-        title_id=tid,
-        rights_id=rid,
-        title_key=title_key,
-    )
+        ]
+        contents = [(build_nca(keys, sections, content_type=0, **kw), 1)]
+    else:
+        tree = patched_tree(base.romfs_tree)
+        exefs = [("main", os.urandom(0x1C00)), ("main.npdm", os.urandom(0x200))]
+        sections = [
+            SectionSpec("pfs0", build_pfs0(exefs)),
+            SectionSpec("romfs", build_romfs(tree), bktr=BktrSpec(base.romfs_section)),
+        ]
+        control = build_romfs({"control.nacp": build_nacp(base.name, base.publisher, "1.2.4")})
+        contents = [
+            (build_nca(keys, sections, content_type=0, **kw), 1),
+            (build_nca(keys, [SectionSpec("romfs", control)], content_type=2, **kw), 3),
+        ]
     ext = cnmt_ext(0x81, application_id=application_id)
-    meta = build_meta_nca(keys, tid, version, 0x81, [(program, 1)], ext, key_generation)
+    meta = build_meta_nca(
+        keys, tid, version, 0x81, contents, ext, key_generation, plaintext=plaintext
+    )
     tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key))
-    files = [(nca_name(program), program), (nca_name(meta, meta=True), meta)]
-    return FakeContent(files + ticket_files(rid, tik), tid, version, application_id)
+    files = [(nca_name(blob), blob) for blob, _ in contents] + [(nca_name(meta, meta=True), meta)]
+    return FakeContent(files + ticket_files(rid, tik), tid, version, application_id, tree, exefs)

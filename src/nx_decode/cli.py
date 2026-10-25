@@ -6,6 +6,7 @@ import argparse
 import io
 import sys
 from collections.abc import Sequence
+from contextlib import ExitStack
 from pathlib import Path
 
 from . import __version__
@@ -23,7 +24,8 @@ from .keys import Keyset
 from .library import Library, scan
 from .nca import DISTRIBUTION, ENC_NAMES, HASH_NAMES, Nca, Section
 from .romfs import RomFS
-from .title import TitleReport, inspect, load_tickets
+from .title import NcaReport, TitleReport, inspect
+from .update import Pairing, apply_base, choose_update, pair
 from .verify import verify_container
 
 EXIT_OK, EXIT_ERROR, EXIT_USAGE = 0, 1, 2
@@ -61,6 +63,26 @@ def open_input(storage: Storage, path: str, ticket: str | None = None) -> Contai
         tik = Path(ticket).read_bytes()
         files.append(ContainerFile(Path(ticket).name, len(tik), MemoryStorage(tik)))
     return Container("NCA", storage, files)
+
+
+def inspect_file(
+    stack: ExitStack, path: str, keyset: Keyset | None, ticket: str | None = None
+) -> TitleReport:
+    """Open and inspect a file; it stays open until ``stack`` closes."""
+    storage = stack.enter_context(FileStorage.open(path))
+    return inspect(open_input(storage, path, ticket), keyset)
+
+
+def with_base(
+    stack: ExitStack, update: TitleReport, base_path: str | None, keyset: Keyset | None, name: str
+) -> Pairing | None:
+    """With ``--base``, pair the update with that base game so BKTR sections decode."""
+    if not base_path:
+        return None
+    base = inspect_file(stack, base_path, keyset)
+    pairing = pair(update, base, name, Path(base_path).name)
+    apply_base(update, pairing, keyset)
+    return pairing
 
 
 # ----------------------------------------------------------------------------- list / extract
@@ -114,9 +136,11 @@ def _yesno(rep_ok: bool, problem: str) -> str:
     return "yes" if rep_ok else f"no: {problem}" if problem else "no"
 
 
-def print_info(report: TitleReport, name: str) -> None:
+def print_info(report: TitleReport, name: str, base_name: str = "") -> None:
     c = report.container
     print(f"File:     {name} ({c.kind})")
+    if base_name:
+        print(f"Base game: {base_name} (the update's BKTR sections read from it)")
     if c.kind == "XCI" and c.xci_header:
         print(f"Partitions: {', '.join(c.partitions)}")
     for m in report.metas:
@@ -175,13 +199,14 @@ def print_nca_header(nca: Nca) -> None:
 
 def cmd_info(args: argparse.Namespace) -> int:
     keyset = load_keyset(args, required=False)
-    with FileStorage.open(args.file) as st:
-        c = open_input(st, args.file, args.ticket)
-        report = inspect(c, keyset)
-        if c.kind == "NCA" and report.ncas and report.ncas[0].nca:
+    name = Path(args.file).name
+    with ExitStack() as stack:
+        report = inspect_file(stack, args.file, keyset, args.ticket)
+        with_base(stack, report, args.base, keyset, name)
+        if report.container.kind == "NCA" and report.ncas and report.ncas[0].nca:
             print_nca_header(report.ncas[0].nca)
             print()
-        print_info(report, Path(args.file).name)
+        print_info(report, name, Path(args.base).name if args.base else "")
         return EXIT_OK if all(r.decrypts for r in report.ncas) else EXIT_ERROR
 
 
@@ -204,37 +229,72 @@ def extract_section(s: Section, out: Path) -> str:
     return f"section {s.index}: romfs, {count} files ({human(total)}) -> {dest}"
 
 
+def nca_extract_jobs(
+    stack: ExitStack, args: argparse.Namespace, keyset: Keyset
+) -> tuple[list[tuple[NcaReport, str]], bool]:
+    """The NCAs to extract, each with a label, and whether FILE is a standalone NCA.
+
+    With ``--base`` or ``--update`` that is the updated title: the update's NCAs
+    (BKTR sections patched from the base game) plus the base contents it keeps.
+    """
+    if args.base and args.update:
+        raise NxError("give --base (FILE is the update) or --update (FILE is the base), not both")
+    if args.update_version is not None and not args.update:
+        raise NxError("--update-version chooses among the --update files")
+    target = inspect_file(stack, args.file, keyset, args.ticket)
+    standalone = target.container.kind == "NCA"
+    if not (args.base or args.update):
+        return [(rep, "") for rep in target.ncas], standalone
+    if args.base:
+        update, update_path = target, args.file
+        base, base_path = inspect_file(stack, args.base, keyset), args.base
+    else:
+        updates = [(path, inspect_file(stack, path, keyset)) for path in args.update]
+        update_path, update = choose_update(updates, args.update_version)
+        base, base_path = target, args.file
+    pairing = pair(update, base, Path(update_path).name, Path(base_path).name)
+    apply_base(update, pairing, keyset)
+    if pairing.patch_meta and pairing.base_meta:
+        others = len(args.update or [])
+        choice = f" (highest of {others})" if others > 1 and args.update_version is None else ""
+        print(
+            f"update v{pairing.patch_meta.version}{choice} from {update_path} "
+            f"on base game {pairing.base_meta.title_id:016x} from {base_path}"
+        )
+    for note in update.notes:
+        print(f"note: {note}")
+    jobs = [(rep, "") for rep in update.ncas]
+    return jobs + [(rep, " (kept from the base game)") for rep in pairing.base_only], standalone
+
+
 def cmd_nca_extract(args: argparse.Namespace) -> int:
     keyset = load_keyset(args, required=True)
+    assert keyset is not None
     out = Path(args.output)
     problems = 0
-    with FileStorage.open(args.file) as st:
-        c = open_input(st, args.file, args.ticket)
-        files = c.content_files()
-        tickets = load_tickets(files, [])
-        ncas = [f for f in files if f.name.lower().endswith(".nca")]
+    with ExitStack() as stack:
+        jobs, standalone = nca_extract_jobs(stack, args, keyset)
         if args.nca:
-            ncas = [f for f in ncas if f.name in args.nca or f.path in args.nca]
-            if not ncas:
+            jobs = [(r, lb) for r, lb in jobs if {r.file.name, r.file.path} & set(args.nca)]
+            if not jobs:
                 raise NxError(f"no NCA named {', '.join(args.nca)}")
-        for f in ncas:
-            dest = out if c.kind == "NCA" else safe_join(out, f.name.split(".")[0])
-            print(f"{f.path}:")
-            try:
-                nca = Nca(f.storage, keyset, tickets, name=f.name)
-                sections = [
-                    s for s in nca.sections if args.section is None or s.index == args.section
-                ]
-                for s in sections:
-                    try:
-                        s.check_supported()
-                        print("  " + extract_section(s, dest))
-                    except NxError as e:
-                        problems += 1
-                        print(f"  skipped section {s.index}: {e}")
-            except NxError as e:
+        for rep, label in jobs:
+            f = rep.file
+            dest = out if standalone else safe_join(out, f.name.split(".")[0])
+            print(f"{f.path}{label}:")
+            if rep.nca is None:
                 problems += 1
-                print(f"  skipped: {e}")
+                print(f"  skipped: {rep.problem}")
+                continue
+            for s in rep.nca.sections:
+                if args.section is not None and s.index != args.section:
+                    continue
+                try:
+                    s.check_supported()
+                    print("  " + extract_section(s, dest))
+                except NxError as e:
+                    problems += 1
+                    print(f"  skipped section {s.index}: {e}")
     if problems:
         print(f"{problems} item(s) could not be extracted (see above)", file=sys.stderr)
     return EXIT_ERROR if problems else EXIT_OK
@@ -245,9 +305,10 @@ def cmd_nca_extract(args: argparse.Namespace) -> int:
 
 def cmd_verify(args: argparse.Namespace) -> int:
     keyset = load_keyset(args, required=False)
-    with FileStorage.open(args.file) as st:
-        c = open_input(st, args.file, args.ticket)
-        checks = verify_container(c, keyset, quick=args.quick)
+    with ExitStack() as stack:
+        report = inspect_file(stack, args.file, keyset, args.ticket)
+        with_base(stack, report, args.base, keyset, Path(args.file).name)
+        checks = verify_container(report.container, keyset, quick=args.quick, report=report)
     failed = skipped = 0
     for ch in checks:
         tag = "OK  " if ch.ok else "SKIP" if ch.ok is None else "FAIL"
@@ -306,6 +367,11 @@ def cmd_titles(args: argparse.Namespace) -> int:
 # ----------------------------------------------------------------------------- parser
 
 
+def update_version(text: str) -> int:
+    """A CNMT version as ``titles`` prints it: ``65536``, ``v65536`` or ``0x10000``."""
+    return int(text.lower().removeprefix("v"), 0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
@@ -315,6 +381,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ticket = argparse.ArgumentParser(add_help=False)
     ticket.add_argument("--ticket", metavar="TIK", help="ticket for a standalone rights-ID .nca")
+    base = argparse.ArgumentParser(add_help=False)
+    base.add_argument(
+        "--base",
+        metavar="FILE",
+        help="FILE is an update: decode its BKTR (patched RomFS) sections against this base game",
+    )
 
     p = argparse.ArgumentParser(
         prog="nx-decode",
@@ -325,7 +397,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--debug", action="store_true", help="show tracebacks for unexpected errors")
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    s = sub.add_parser("info", parents=[common, ticket], help="title, version, name and NCA status")
+    s = sub.add_parser(
+        "info", parents=[common, ticket, base], help="title, version, name and NCA status"
+    )
     s.add_argument("file", help="XCI, NSP or NCA")
     s.set_defaults(func=cmd_info)
 
@@ -341,16 +415,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser(
         "nca-extract",
-        parents=[common, ticket],
+        parents=[common, ticket, base],
         help="decrypt NCAs and extract ExeFS/PFS0/RomFS sections",
     )
     s.add_argument("file", help="NCA, or an XCI/NSP (all NCAs unless --nca is given)")
     s.add_argument("-o", "--output", required=True, help="output directory")
     s.add_argument("--nca", action="append", metavar="NAME", help="only this NCA (repeatable)")
     s.add_argument("--section", type=int, choices=range(4), help="only this section index")
+    s.add_argument(
+        "--update",
+        action="append",
+        metavar="FILE",
+        help="FILE is the base game: extract it with this update applied "
+        "(repeatable; the highest version is used)",
+    )
+    s.add_argument(
+        "--update-version",
+        type=update_version,
+        metavar="N",
+        help="with several --update files, use this version (e.g. 65536 or v65536)",
+    )
     s.set_defaults(func=cmd_nca_extract)
 
-    s = sub.add_parser("verify", parents=[common, ticket], help="check hashes and content IDs")
+    s = sub.add_parser(
+        "verify", parents=[common, ticket, base], help="check hashes and content IDs"
+    )
     s.add_argument("file")
     s.add_argument("--quick", action="store_true", help="skip full-data hashing")
     s.set_defaults(func=cmd_verify)

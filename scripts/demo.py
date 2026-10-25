@@ -3,12 +3,12 @@
 
     python scripts/demo.py [--keep DIR]
 
-Builds a small fake library (a base game XCI, two updates, two DLC and one DLC
-whose base is missing) with randomly generated keys, using the same builders as
-the test suite, then runs ``info``, ``list``, ``verify``, ``nca-extract`` and
-``titles`` on it. Nothing here is real Nintendo data. The files live in a temporary
-directory that is deleted afterwards, unless ``--keep DIR`` is given (DIR must be
-outside the repository).
+Builds a small fake library (a base game XCI, two updates with real BKTR sections,
+two DLC and one DLC whose base is missing) with randomly generated keys, using the
+same builders as the test suite, then runs ``info``, ``list``, ``verify``,
+``nca-extract`` (with and without an update applied) and ``titles`` on it. Nothing
+here is real Nintendo data. The files live in a temporary directory that is deleted
+afterwards, unless ``--keep DIR`` is given (DIR must be outside the repository).
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def build_library(root: Path) -> Path:
         build_xci({"update": [], "normal": [], "secure": game.files})
     )
     for version in (0x10000, 0x20000):
-        patch = build_patch(game.keys, BASE, version=version)
+        patch = build_patch(game.keys, BASE, version=version, base=game)
         (root / "updates" / f"update-v{version}.nsp").write_bytes(build_pfs0(patch.files))
     for index in (1, 2):
         dlc = build_dlc(game.keys, BASE, index=index)
@@ -82,18 +82,30 @@ def main(argv: list[str] | None = None) -> int:
         keys = ["--keys", str(build_library(root))]
         print(f"synthetic library (random keys, no real data) in {root}")
         base, upd = root / "games" / "base.xci", root / "updates" / "update-v131072.nsp"
+        old_upd = root / "updates" / "update-v65536.nsp"
         dlc, out = root / "dlc" / "dlc1.nsp", root / "extracted"
+        applied = ["--update", str(old_upd), "--update", str(upd), "-o", str(root / "patched")]
         results = [
             run("info: base game", ["info", *keys, str(base)], 0),
-            run("info: update (BKTR stays unsupported)", ["info", *keys, str(upd)], 0),
+            run("info: update alone (BKTR needs --base)", ["info", *keys, str(upd)], 0),
+            run(
+                "verify: update against its base",
+                ["verify", *keys, str(upd), "--base", str(base)],
+                0,
+            ),
             run("info: DLC", ["info", *keys, str(dlc)], 0),
             run("list", ["list", str(base)], 0),
             run("verify", ["verify", *keys, str(base)], 0),
             run("nca-extract: DLC", ["nca-extract", *keys, str(dlc), "-o", str(out)], 0),
             run(
-                "nca-extract: update (expected to skip)",
+                "nca-extract: update without --base (expected to skip)",
                 ["nca-extract", *keys, str(upd), "-o", str(out)],
                 1,
+            ),
+            run(
+                "nca-extract: base game with the highest update applied",
+                ["nca-extract", *keys, str(base), *applied],
+                0,
             ),
             run("titles", ["titles", *keys, str(root)], 0),
         ]

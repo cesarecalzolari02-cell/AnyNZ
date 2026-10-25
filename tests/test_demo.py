@@ -19,8 +19,9 @@ def load_demo():
 def test_demo_runs_end_to_end(capsys) -> None:
     assert load_demo().main([]) == 0
     out = capsys.readouterr().out
-    assert "8/8 steps behaved as expected" in out
+    assert "10/10 steps behaved as expected" in out
     assert "DLC without its base game" in out and "needs the base game" in out
+    assert "update v131072 (highest of 2)" in out
 
 
 def test_demo_keep_refuses_the_repository() -> None:
