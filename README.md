@@ -186,7 +186,8 @@ real keys or Nintendo data are in this repository or its tests.**
 `scripts/check_forbidden.py` runs as a git pre-commit hook, as an optional
 [pre-commit](https://pre-commit.com) hook and in CI. It rejects any file that
 contains a keys-file-like line (`name = <32 or 64 hex digits>`), any Switch
-container (by magic bytes) and any `.keys/.xci/.nsp/.nca/.tik/.cert/...` file.
+container (by magic bytes), any `.keys/.xci/.nsp/.nca/.tik/.cert/...` file and
+any archive (`.rar/.7z/.zip`). It reads only the first 4 MiB of each file.
 
 ## License
 

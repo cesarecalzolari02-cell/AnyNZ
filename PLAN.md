@@ -28,7 +28,7 @@ patches or signs anything.
     form stops building after 2027-02-18), Python 3.10-3.14 classifiers.
   - [x] CI: Python 3.14, current action versions, a `package` job (build sdist and
     wheel, forbidden-file check on the sdist, install the wheel, run it).
-  - [ ] Repo hygiene: `.gitattributes` (the shell hook keeps LF on Windows
+  - [x] Repo hygiene: `.gitattributes` (the shell hook keeps LF on Windows
     checkouts with `core.autocrlf`), `check_forbidden.py` reads only the start of
     each file or staged blob, an issue template that says never to attach keys or
     game files.

@@ -7,7 +7,9 @@ Usage:
     check_forbidden.py --all        check every tracked file (CI)
 
 Exit status is 1 if anything is flagged. Offending lines are never printed, only
-their file and line number, so a leaked key does not end up in CI logs.
+their file and line number, so a leaked key does not end up in CI logs. Only the
+first 4 MiB of each file or blob is read, so an accidentally staged multi-gigabyte
+dump is never loaded into memory.
 """
 
 from __future__ import annotations
@@ -33,6 +35,10 @@ FORBIDDEN_SUFFIXES = {
     ".cert",
     ".cnmt",
     ".nacp",
+    # archives: dumps are often passed around wrapped in one
+    ".rar",
+    ".7z",
+    ".zip",
 }
 
 # (offset, magic) pairs identifying Switch containers and NCAs.
@@ -46,7 +52,7 @@ MAGICS: list[tuple[int, bytes]] = [
     (0x4000, b"NCZSECTN"),
 ]
 
-MAX_SCAN = 4 * 1024 * 1024  # key lines are scanned in the first 4 MiB only
+MAX_SCAN = 4 * 1024 * 1024  # bytes read per file: all magics and key lines are looked for here
 
 
 def problems(name: str, data: bytes) -> Iterator[str]:
@@ -66,11 +72,30 @@ def _git(*args: str) -> bytes:
     return subprocess.run(["git", *args], check=True, capture_output=True).stdout
 
 
+def _staged_head(name: str) -> bytes:
+    """The first :data:`MAX_SCAN` bytes of a staged blob, without reading the rest."""
+    with subprocess.Popen(
+        ["git", "cat-file", "blob", f":{name}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    ) as proc:
+        assert proc.stdout is not None
+        data = proc.stdout.read(MAX_SCAN)
+        proc.stdout.close()
+        proc.kill()
+    return data
+
+
+def _file_head(path: Path) -> bytes:
+    with open(path, "rb") as f:
+        return f.read(MAX_SCAN)
+
+
 def staged_files() -> Iterable[tuple[str, bytes]]:
     names = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z").split(b"\0")
     for raw in filter(None, names):
         name = raw.decode()
-        yield name, _git("show", f":{name}")
+        yield name, _staged_head(name)
 
 
 def tracked_files() -> Iterable[tuple[str, bytes]]:
@@ -78,14 +103,14 @@ def tracked_files() -> Iterable[tuple[str, bytes]]:
         name = raw.decode()
         path = Path(name)
         if path.is_file():
-            yield name, path.read_bytes()
+            yield name, _file_head(path)
 
 
 def disk_files(paths: Iterable[str]) -> Iterable[tuple[str, bytes]]:
     for name in paths:
         path = Path(name)
         if path.is_file():
-            yield name, path.read_bytes()
+            yield name, _file_head(path)
 
 
 def main(argv: list[str] | None = None) -> int:

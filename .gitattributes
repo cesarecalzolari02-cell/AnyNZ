@@ -1,0 +1,5 @@
+# LF in the repository. Shell scripts also stay LF in Windows checkouts made
+# with core.autocrlf=true, where a CRLF hook would break.
+* text=auto
+.githooks/* text eol=lf
+*.sh text eol=lf

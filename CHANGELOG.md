@@ -14,6 +14,16 @@
   files, installs the wheel in a clean venv and runs the tests from the sdist.
 - ruff is pinned to one minor version so a ruff release cannot break CI.
 
+### Repository
+
+- `.gitattributes`: LF in the repository; the shell hook stays LF in Windows
+  checkouts made with `core.autocrlf=true`.
+- `check_forbidden.py` reads only the first 4 MiB of each file or staged blob, so
+  an accidentally staged dump is not loaded whole. It also rejects archives
+  (`.rar`, `.7z`, `.zip`), which often wrap dumps; `.gitignore` ignores them.
+- An issue template that asks for the command and output, and says never to attach
+  keys or game files.
+
 ## 0.1.0
 
 First version: `info`, `list`, `extract`, `nca-extract`, `verify` and `titles`

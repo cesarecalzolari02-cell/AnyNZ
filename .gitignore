@@ -13,6 +13,10 @@ dev.keys
 *.cert
 *.cnmt
 *.nacp
+# archives often wrap dumps
+*.rar
+*.7z
+*.zip
 
 # Output folders
 out/

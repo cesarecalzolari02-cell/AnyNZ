@@ -36,7 +36,7 @@ def test_flags_containers() -> None:
     ncz = bytearray(os.urandom(0x5000))
     ncz[0x4000:0x4008] = b"NCZSECTN"
     assert flagged("blob.bin", bytes(ncz))
-    for ext in (".keys", ".xci", ".nsp", ".nca", ".tik", ".cert", ".nsz", ".xcz"):
+    for ext in (".keys", ".xci", ".nsp", ".nca", ".tik", ".cert", ".nsz", ".xcz", ".rar", ".7z"):
         assert flagged(f"file{ext}", b"")
     assert not flagged("src/module.py", b"print('hello')\n")
 
@@ -56,6 +56,18 @@ def test_staged_mode_blocks_commit(tmp_path) -> None:
     assert run.returncode == 1
     assert b"leak.txt:1" in run.stderr
     assert b"titlekek_00 =" not in run.stderr
+
+
+def test_reads_only_the_start_of_big_files(tmp_path, monkeypatch) -> None:
+    big = tmp_path / "big.bin"
+    with open(big, "wb") as f:
+        f.truncate(2 * check.MAX_SCAN)
+    assert [len(data) for _, data in check.disk_files([str(big)])] == [check.MAX_SCAN]
+
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(["git", "add", "big.bin"], check=True)
+    assert [len(data) for _, data in check.staged_files()] == [check.MAX_SCAN]
 
 
 @pytest.mark.skipif(not (ROOT / ".git").exists(), reason="not a git checkout (e.g. an sdist)")
