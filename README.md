@@ -118,7 +118,7 @@ into memory.
 | Metadata | CNMT (title ID, version, type, content records, ApplicationId / PatchId from the extended header, system-update content meta records), NACP (name, publisher, display version) |
 | Content meta types | Application, Patch and AddOnContent are grouped into titles; Delta, DataPatch and SystemUpdate are listed only |
 | DLC (AddOnContent) | `info`, `verify` and `nca-extract` via common or personalized tickets, like any RomFS |
-| Updates (Patch) | grouped by `titles`; BKTR sections (relocation and subsection bucket trees, AES-CTR-EX, indirect storage) decoded against the base game with `--base` / `--update` in `info`, `verify` and `nca-extract` |
+| Updates (Patch) | grouped by `titles`; BKTR sections (relocation and subsection bucket trees of any size, AES-CTR-EX, indirect storage) decoded against the base game with `--base` / `--update` in `info`, `verify` and `nca-extract` |
 | Verify | content ID = SHA-256[:16], CNMT hash and size, FS-header hashes, master hashes, full hash tables (for an update with `--base`, over the patched RomFS), XCI root/partition HFS0 hashes |
 
 ### Not supported (reported clearly, never a crash)
@@ -127,7 +127,7 @@ into memory.
 | --- | --- |
 | An update's BKTR section without its base game | "BKTR patch section: needs the base game (pass --base)" (the ExeFS and Control NCA still decode) |
 | Personalized tickets without `eticket_rsa_keypair` | `missing key: eticket_rsa_keypair (needed for personalized tickets ...)` |
-| BKTR with skip-layer-hash encryption (14.0.0+), BKTR tables needing a second index level (over ~1.6 million relocation entries) | "... not supported" |
+| BKTR with skip-layer-hash encryption (14.0.0+) | "... not supported" |
 | Keys for a newer key generation than your keys file has | `missing key: ...` naming the key and the key generation |
 | NSZ / XCZ / NCZ (compressed) | "compressed; decompress first" |
 | NCA0, sparse sections, compressed sections, metadata hash layers, SHA3 hash layers, skip-layer-hash encryption, unknown types | "... not supported" |
@@ -185,6 +185,10 @@ were no longer reachable.
   key block is RSA-2048-OAEP with SHA-256 and an empty label, which unwraps to
   the same titlekek-wrapped key a common ticket holds. Switchbrew only says
   "RSA-2048".
+- **Atmosphère only** (`fssystem_bucket_tree`, GPL-2.0): the second offset level of
+  very large bucket trees (more than 0x7FE entry sets, about 1.6 million relocation
+  entries). nxdumptool ports the lookup but refuses such tables; Switchbrew and
+  hactool do not describe them.
 - **Not confirmed by any source reached:** the exact `eticket_rsa_keypair` layout
   in a Lockpick_RCM keys file. nx-decode reads D, N and E at 0, 0x100 and 0x200
   (nxdumptool's field order without the CTR) and checks the keypair works before

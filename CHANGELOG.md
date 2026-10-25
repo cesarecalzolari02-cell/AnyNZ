@@ -18,6 +18,10 @@
 - Personalized tickets decrypt with `eticket_rsa_keypair` from your keys file
   (RSA-2048-OAEP, SHA-256). Missing, another console's or malformed keypairs are
   reported clearly; verify skips such NCAs instead of failing them.
+- Bucket trees of any size: past 0x7FE entry sets (about 1.6 million relocation
+  entries) the second offset level is read as Atmosphère lays it out. Entry sets
+  are read and checked on first use, so memory follows the table, not its entry
+  count.
 - `scripts/smoke.py --base` and the demo apply an update. New synthetic fixtures:
   real BKTR sections (relocations into the base, several generations, an
   unencrypted subsection, multi-node tables), personalized games and DLC with a

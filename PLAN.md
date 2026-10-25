@@ -58,7 +58,12 @@ and 4):
 - [x] 6. Synthetic base + patch pair with real BKTR tables, personalized tickets,
   README / supported table / CHANGELOG, hygiene checks.
 
-`CLAUDE.md`'s scope section has to be updated by the owner to match items 3 and 5.
+**Phase 5c: hardening that needs no real files** (while Phase 6 waits for dumps):
+
+- [x] BKTR tables with a second offset level (Atmosphère's layout), entry sets read
+  on demand; tested with small nodes and one real-size 1.67-million-entry table.
+- [ ] Windows extraction: a file whose path Windows can't create is skipped and
+  reported, and the rest of the RomFS still extracts.
 
 Next (not started):
 

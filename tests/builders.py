@@ -147,18 +147,43 @@ def aes_ctr_ex_entry(offset: int, generation: int, encrypted: bool = True) -> by
     return struct.pack("<QB3xI", offset, 0 if encrypted else 1, generation)
 
 
-def build_bucket_tree(entries: list[bytes], end_offset: int) -> bytes:
-    per_set = (0x4000 - 0x10) // len(entries[0])
+def build_bucket_tree(entries: list[bytes], end_offset: int, node_size: int = 0x4000) -> bytes:
+    """Node storage (L1, plus L2 offset nodes past 0x7FE entry sets), then the entry sets.
+
+    With L2 nodes, L1 lists their start offsets first and the first entry sets in
+    its remaining slots (Atmosphère's layout); each L2 node indexes the next sets.
+    """
+    per_set = (node_size - 0x10) // len(entries[0])
+    per_node = (node_size - 0x10) // 8
     sets = [entries[i : i + per_set] for i in range(0, len(entries), per_set)]
     starts = [struct.unpack_from("<Q", s[0])[0] for s in sets]
-    offset_node = struct.pack("<IIQ", 0, len(sets), end_offset)
-    offset_node += struct.pack(f"<{len(starts)}Q", *starts)
-    nodes = [offset_node.ljust(0x4000, b"\0")]
-    for i, entry_set in enumerate(sets):
-        set_end = starts[i + 1] if i + 1 < len(sets) else end_offset
-        node = struct.pack("<IIQ", i, len(entry_set), set_end) + b"".join(entry_set)
-        nodes.append(node.ljust(0x4000, b"\0"))
-    return b"".join(nodes)
+
+    def node(index: int, count: int, end: int, body: bytes) -> bytes:
+        return (struct.pack("<IIQ", index, count, end) + body).ljust(node_size, b"\0")
+
+    def offsets(values: list[int]) -> bytes:
+        return struct.pack(f"<{len(values)}Q", *values)
+
+    if len(sets) <= per_node:
+        node_storage = [node(0, len(sets), end_offset, offsets(starts))]
+    else:
+        estimate = -(-len(sets) // per_node)
+        l2_count = -(-(len(sets) - (per_node - (estimate - 1))) // per_node)
+        tail = per_node - l2_count  # entry sets indexed straight from L1
+        chunks = [starts[i : i + per_node] for i in range(tail, len(starts), per_node)]
+        assert len(chunks) == l2_count
+        heads = [c[0] for c in chunks]
+        l1 = node(0, l2_count, end_offset, offsets(heads) + offsets(starts[:tail]))
+        l2 = [
+            node(k, len(c), heads[k + 1] if k + 1 < len(heads) else end_offset, offsets(c))
+            for k, c in enumerate(chunks)
+        ]
+        node_storage = [l1, *l2]
+    entry_sets = [
+        node(i, len(s), starts[i + 1] if i + 1 < len(sets) else end_offset, b"".join(s))
+        for i, s in enumerate(sets)
+    ]
+    return b"".join(node_storage + entry_sets)
 
 
 @dataclass

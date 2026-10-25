@@ -45,9 +45,9 @@ from .bktr import (
     AES_CTR_EX_ENTRY_SIZE,
     INDIRECT_ENTRY_SIZE,
     AesCtrExStorage,
+    BucketTree,
     IndirectStorage,
     TableInfo,
-    read_bucket_tree,
 )
 from .crypto import SECTOR, ctr_crypt, ecb_decrypt, xts_decrypt
 from .errors import FormatError, MissingKeyError, MissingTicketError, NxError, UnsupportedError
@@ -408,11 +408,11 @@ class Section:
             self.offset,
             None if keys is None else keys.ctr,
             self.fs.ctr_upper[:4],  # SecureValue; the generation comes from each entry
-            read_bucket_tree(tables, subsection, AES_CTR_EX_ENTRY_SIZE, "subsection"),
+            BucketTree(tables, subsection, AES_CTR_EX_ENTRY_SIZE, "subsection"),
         )
         base = self.nca.base.section(self.index).storage()
         return IndirectStorage(
-            base, patch, read_bucket_tree(tables, relocation, INDIRECT_ENTRY_SIZE, "relocation")
+            base, patch, BucketTree(tables, relocation, INDIRECT_ENTRY_SIZE, "relocation")
         )
 
     @cached_property
