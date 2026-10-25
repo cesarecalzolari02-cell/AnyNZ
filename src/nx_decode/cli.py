@@ -279,8 +279,11 @@ def nca_extract_jobs(
         )
     for note in update.notes:
         print(f"note: {note}")
-    jobs = [(rep, "") for rep in update.ncas]
-    return jobs + [(rep, " (kept from the base game)") for rep in pairing.base_only], standalone
+    kept = {id(rep) for rep in pairing.base_only}
+    jobs = pairing.updated_title(update)
+    return [
+        (rep, " (kept from the base game)" if id(rep) in kept else "") for rep in jobs
+    ], standalone
 
 
 def cmd_nca_extract(args: argparse.Namespace) -> int:

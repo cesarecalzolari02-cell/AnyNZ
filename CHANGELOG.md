@@ -27,6 +27,13 @@
   and extracts the rest, instead of stopping. On Windows, files are written through
   the `\\?\` prefix so paths over 260 characters work with long paths off. A full
   or read-only disk still stops extraction.
+- Fixed: with a container holding several titles (base + update + DLC in one NSP,
+  or a game card with its update), the updated title also contained the base
+  game's replaced NCAs and the DLC. It now holds only the update's content set and
+  the base contents it keeps.
+- Fixed: two RomFS files whose names differ only in letter case silently
+  overwrote each other on Windows and macOS. The second is now skipped and listed.
+- A truncated base NCA is reported as unreadable instead of "has no section".
 - `scripts/smoke.py --base` and the demo apply an update. New synthetic fixtures:
   real BKTR sections (relocations into the base, several generations, an
   unencrypted subsection, multi-node tables), personalized games and DLC with a

@@ -15,7 +15,7 @@ from .containers import Container, ContainerFile, PartitionFS, is_ncz
 from .errors import KeysError, MissingTicketError, NxError, UnsupportedError
 from .keys import Keyset
 from .meta import Cnmt, Nacp, parse_cnmt, parse_nacp
-from .nca import Nca
+from .nca import CONTENT_CONTROL, CONTENT_META, Nca
 from .romfs import RomFS
 from .ticket import Ticket, parse_ticket
 
@@ -135,9 +135,9 @@ def inspect(container: Container, keyset: Keyset | None) -> TitleReport:
         if not (rep.nca and rep.decrypts):
             continue
         try:
-            if rep.nca.header.content_type == 1 and (cnmt := read_cnmt(rep.nca)):
+            if rep.nca.header.content_type == CONTENT_META and (cnmt := read_cnmt(rep.nca)):
                 metas.append(cnmt)
-            elif rep.nca.header.content_type == 2 and (nacp := read_nacp(rep.nca)):
+            elif rep.nca.header.content_type == CONTENT_CONTROL and (nacp := read_nacp(rep.nca)):
                 nacps[rep.nca.header.title_id] = nacp
         except NxError as e:
             notes.append(f"{rep.file.path}: {e}")

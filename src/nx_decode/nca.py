@@ -62,6 +62,7 @@ MEDIA_UNIT = 0x200
 MIN_HASH_BLOCK, MAX_HASH_BLOCK = 0x10, 0x1000000
 
 CONTENT_TYPES = {0: "Program", 1: "Meta", 2: "Control", 3: "Manual", 4: "Data", 5: "PublicData"}
+CONTENT_META, CONTENT_CONTROL = 1, 2
 DISTRIBUTION = {0: "Download", 1: "GameCard"}
 
 FS_ROMFS, FS_PFS0 = 0, 1
@@ -363,6 +364,8 @@ class Section:
             return "BKTR patch section (update/patch NCA): needs the base game (pass --base)"
         try:
             base_section = base.section(self.index)
+        except FormatError as e:
+            return f"the base game's NCA can't be read: {e}"
         except NxError:
             return f"the base game's NCA has no section {self.index} to patch"
         if base_section.kind != "RomFS":

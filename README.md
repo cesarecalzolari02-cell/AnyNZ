@@ -91,7 +91,10 @@ several updates, the highest version is used unless `--update-version N`),
 patched from the base game, and the base game's contents the update does not
 replace (such as a manual). The update's ExeFS is a plain section and extracts as
 is. NCAs are paired by content type and ID offset from the two CNMTs, and the
-update's CNMT must name the base game as its application.
+update's CNMT must name the base game as its application. A file that holds
+several titles (a game card with its update, or base + update + DLC in one NSP)
+works too: pass it as both FILE and `--base`, and only the update's own contents
+and the base contents it keeps are extracted.
 
 `titles` takes any mix of files and folders (searched recursively for
 `.xci`/`.nsp`/`.nca`), reads every content set's CNMT and groups them by the
@@ -108,7 +111,10 @@ into memory.
 When a name inside a container can't be a file on your system (`..` or a drive
 letter anywhere; on Windows also characters such as `?` or `|`, a trailing dot or
 space, or device names like `CON` and `NUL`), that one file is skipped and listed,
-the rest still extracts, and the exit status is 1. Nothing is renamed. On Windows,
+the rest still extracts, and the exit status is 1. Nothing is renamed. The same
+goes for two files whose names differ only in letter case when your file system
+ignores case (Windows, macOS): the second is skipped instead of silently
+overwriting the first. On Windows,
 paths longer than 260 characters work even with Windows' long-path setting off.
 
 ### Supported

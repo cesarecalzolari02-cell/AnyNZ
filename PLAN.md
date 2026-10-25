@@ -62,6 +62,9 @@ and 4):
 
 - [x] BKTR tables with a second offset level (Atmosphère's layout), entry sets read
   on demand; tested with small nodes and one real-size 1.67-million-entry table.
+- [x] Review of the Phase 5 code: the updated title from a multi-title container
+  holds only the update's content set; names differing only in case no longer
+  overwrite each other on case-insensitive file systems.
 - [x] Windows extraction: a file whose path Windows can't create is skipped and
   reported, and the rest of the RomFS still extracts; long paths via `\\?\`.
 

@@ -112,3 +112,31 @@ def test_a_full_disk_stops_extraction_instead_of_skipping(tmp_path, monkeypatch)
     with pytest.raises(OSError) as e:
         write_entry(MemoryStorage(b"data"), tmp_path, "file.bin")
     assert not isinstance(e.value, OutputPathError)
+
+
+def test_names_differing_only_in_case_never_overwrite_each_other(tmp_path, capsys) -> None:
+    (tmp_path / "Probe").write_bytes(b"")
+    ignores_case = (tmp_path / "probe").exists()  # Windows, macOS: yes; Linux: no
+    tree = {"Data.bin": b"upper", "data.bin": b"lower", "sub": {"X.txt": b"x", "x.TXT": b"y"}}
+    code, root = extract(tmp_path, tree)
+    out = capsys.readouterr().out
+    if ignores_case:
+        assert code == 1
+        assert (
+            "skipped file data.bin: 'data.bin' differs only in letter case from 'Data.bin'" in out
+        )
+        assert "skipped file sub/x.TXT" in out
+        assert (root / "Data.bin").read_bytes() == b"upper"  # the first one is kept intact
+        assert (root / "sub" / "X.txt").read_bytes() == b"x"
+    else:
+        assert code == 0
+        assert (root / "data.bin").read_bytes() == b"lower" and (root / "sub" / "x.TXT").exists()
+
+
+def test_reextracting_into_the_same_folder_still_overwrites(tmp_path) -> None:
+    # Files left by an earlier run are not mistaken for case collisions.
+    nca, keys = romfs_nca(tmp_path, {"a.bin": b"one", "b.bin": b"two"})
+    out = tmp_path / "out"
+    for _ in range(2):
+        assert main(["nca-extract", "--keys", str(keys), str(nca), "-o", str(out)]) == 0
+    assert (out / "section0_romfs" / "b.bin").read_bytes() == b"two"

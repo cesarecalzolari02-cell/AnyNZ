@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from builders import (
+    build_dlc,
     build_game,
     build_patch,
     build_pfs0,
@@ -172,3 +173,36 @@ def test_content_names_are_content_ids(tmp_path) -> None:
     for name, blob in patch.files:
         if name.endswith(".nca"):
             assert name == nca_name(blob, meta=name.endswith(".cnmt.nca"))
+
+
+def test_combined_container_extracts_only_the_updated_title(tmp_path, capsys) -> None:
+    # One NSP holding the base game, its update and a DLC, as some tools pack them.
+    game = build_game(manual=True)
+    patch = build_patch(game.keys, game.title_id, base=game)
+    dlc = build_dlc(game.keys, game.title_id)
+    combined = tmp_path / "all-in-one.nsp"
+    combined.write_bytes(build_pfs0(game.files + patch.files + dlc.files))
+    keys = write_keys_file(tmp_path / "k.keys", game.keys)
+    out = tmp_path / "out"
+    args = ["--keys", str(keys), str(combined), "--base", str(combined)]
+    assert main(["nca-extract", *args, "-o", str(out)]) == 0
+    update_ncas = {n.split(".")[0] for n, _ in patch.files if n.endswith(".nca")}
+    manual = game.files[2][0].split(".")[0]
+    assert {p.name for p in out.iterdir()} == update_ncas | {manual}
+    assert read_tree(program_dir(out, patch) / "section1_romfs") == flatten(patch.romfs_tree)
+    assert capsys.readouterr().out.count("(kept from the base game)") == 1
+    assert main(["info", *args]) == 0
+
+
+def test_a_truncated_base_is_reported_as_unreadable(tmp_path, capsys) -> None:
+    game, _, [(_, patch)], keys = library(tmp_path)
+    base_nca, update_nca = tmp_path / "base.nca", tmp_path / "update.nca"
+    base_nca.write_bytes(game.files[0][1][:0x1000])  # header intact, sections cut off
+    update_nca.write_bytes(patch.files[0][1])
+    ticket = tmp_path / "update.tik"
+    ticket.write_bytes(next(b for n, b in patch.files if n.endswith(".tik")))
+    args = ["info", "--keys", str(keys), str(update_nca), "--ticket", str(ticket)]
+    main([*args, "--base", str(base_nca)])
+    assert "the base game's NCA can't be read: section 0 lies outside the NCA" in (
+        capsys.readouterr().out
+    )

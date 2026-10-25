@@ -22,6 +22,7 @@ from .errors import NxError
 from .io import FileStorage, Storage
 from .keys import Keyset
 from .meta import META_ADDON, META_APPLICATION, META_DELTA, META_PATCH, Cnmt
+from .nca import CONTENT_META
 from .title import inspect
 
 SCAN_SUFFIXES = {".xci", ".nsp", ".nca"}
@@ -178,7 +179,7 @@ def scan(
             for rep in report.ncas:
                 # A Meta NCA that can't be read hides a whole content set.
                 is_meta = (
-                    rep.nca.header.content_type == 1
+                    rep.nca.header.content_type == CONTENT_META
                     if rep.nca
                     else rep.file.name.endswith(".cnmt.nca")
                 )

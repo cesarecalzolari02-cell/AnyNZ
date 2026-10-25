@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import FormatError, OutputPathError
-from .io import Storage, u32, u64, write_entry
+from .io import Storage, safe_join, same_file, u32, u64, write_entry
 
 HEADER_SIZE = 0x50
 NONE = 0xFFFFFFFF
@@ -101,20 +101,31 @@ class RomFS:
     def extract(self, out: Path, skipped: list[tuple[str, str]] | None = None) -> tuple[int, int]:
         """Write the tree under ``out``. Returns ``(files, bytes)`` written.
 
-        A file whose name can't be a file here (unsafe, or refused by the OS) is left
-        out and added to ``skipped`` as ``(path, reason)``; without ``skipped`` it
-        raises :class:`OutputPathError`.
+        A file whose name can't be a file here (unsafe, refused by the OS, or differing
+        only in letter case from an earlier file on a file system that ignores case,
+        where it would silently overwrite that file) is left out and added to
+        ``skipped`` as ``(path, reason)``; without ``skipped`` it raises
+        :class:`OutputPathError`.
         """
         count = total = 0
         out.mkdir(parents=True, exist_ok=True)
+        written: dict[str, tuple[str, Path]] = {}  # case-folded path -> (path, file)
         for f in self.walk():
             try:
+                target = safe_join(out, f.path)
+                earlier = written.get(f.path.casefold())
+                if earlier is not None and same_file(earlier[1], target):
+                    raise OutputPathError(
+                        f"{f.path!r} differs only in letter case from {earlier[0]!r}, "
+                        "and this file system ignores case"
+                    )
                 write_entry(self.open(f), out, f.path)
             except OutputPathError as e:
                 if skipped is None:
                     raise
                 skipped.append((f.path, str(e)))
                 continue
+            written.setdefault(f.path.casefold(), (f.path, target))
             count += 1
             total += f.size
         return count, total

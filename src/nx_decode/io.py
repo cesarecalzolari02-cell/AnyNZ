@@ -210,6 +210,15 @@ def native_path(path: Path) -> str:
     return "\\\\?\\" + full
 
 
+def same_file(a: Path, b: Path) -> bool:
+    """Whether ``a`` and ``b`` are one file on disk, such as two names that differ only
+    in letter case on a file system that ignores case (Windows, macOS by default)."""
+    try:
+        return os.path.samefile(native_path(a), native_path(b))
+    except OSError:  # one of them does not exist
+        return False
+
+
 def write_entry(storage: Storage, base: Path, name: str) -> None:
     """Stream ``storage`` into the file ``base/name`` (``name`` from a container).
 
