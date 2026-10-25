@@ -13,7 +13,7 @@ a file, checks its integrity and extracts its contents.
 
 ## Install
 
-Requires Python 3.10+.
+Requires Python 3.10 or newer. CI tests 3.10, 3.12 and 3.14 on Linux and Windows.
 
 ```sh
 git clone <this repo> nx-decode

@@ -32,11 +32,11 @@ patches or signs anything.
     checkouts with `core.autocrlf`), `check_forbidden.py` reads only the start of
     each file or staged blob, an issue template that says never to attach keys or
     game files.
-  - [ ] Hardening: sanity limits on hash-layout fields (a corrupt IVFC block size
+  - [x] Hardening: sanity limits on hash-layout fields (a corrupt IVFC block size
     must not allocate gigabytes), stream XCI HFS0 entry hashes and verify's hash
     tables, non-ASCII output on Windows legacy code pages, a seeded corruption test
     that runs every command and accepts only clean errors.
-  - [ ] Docs: `CHANGELOG.md`, publishing steps (private repo) in `DEVELOPMENT.md`.
+  - [x] Docs: `CHANGELOG.md`, publishing steps (private repo) in `DEVELOPMENT.md`.
   - [ ] Owner: create the private GitHub repo and push. `origin` is still the local
     bundle, which stops at Phase 4.
 

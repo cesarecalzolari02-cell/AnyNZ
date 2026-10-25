@@ -69,7 +69,11 @@ implementation of the format.
   other and update the README's "Specification sources".
 - **Unsupported, not crashed.** Anything the tool can't decode (BKTR, personalized
   tickets, SHA3 layers, compressed files, unknown key generations) gets a clear
-  reason via `Section.unsupported_reason()` or an `UnsupportedError`.
+  reason via `Section.unsupported_reason()` or an `UnsupportedError`. Corrupt
+  input raises a `FormatError`; `tests/test_robustness.py` runs corrupted
+  synthetic files through every command and fails on anything that escapes as
+  an "internal error". Size fields from a file are bounded before they are used
+  to allocate (see `MAX_HASH_BLOCK` in `nca.py`).
 - **Stream.** Never read a whole container into memory; go through `Storage`.
 - **No key material in output.** Errors may name a key, never show its value.
   Tests assert this for the CLI.
@@ -78,6 +82,28 @@ implementation of the format.
   `rand_key()` and the builders; add a builder option when you need a new field.
 - **Small commits**, each with `ruff check`, `ruff format --check` and `pytest`
   passing.
+
+## Publishing to GitHub
+
+The repository stays **private**. Only the owner decides whether it ever becomes
+public.
+
+1. On GitHub, create an empty **private** repository (no README, license or
+   `.gitignore`; the repository already has them).
+2. Keep the old bundle remote under another name, add GitHub as `origin`, push:
+
+   ```sh
+   git remote rename origin bundle
+   git remote add origin https://github.com/OWNER/nx-decode.git
+   git push -u origin main
+   ```
+
+3. In the Actions tab, `forbidden-files`, `test` (Ubuntu and Windows) and
+   `package` must pass. Optionally protect `main` and require them.
+
+With the hook enabled (`git config core.hooksPath .githooks`), every commit has
+already passed `check_forbidden.py`. CI runs it again on the whole tree and on the
+built packages.
 
 ## Waiting for real files
 
@@ -98,6 +124,10 @@ the terminal only) and check:
 8. **NACP languages 16/17** (Polish, Thai on 21.0.0+): where they live is unclear.
 9. **`titles` speed** on a large XCI (it reads only headers, top-level hashes and
    the small CNMT/NACP files).
+10. **Extraction on Windows:** RomFS paths longer than 260 characters (they need
+    long paths enabled in Windows) and file names with characters Windows forbids
+    (`<>:"|?*`). Today a path Windows can't create stops `nca-extract` with an OS
+    error, and a `:` skips the whole section.
 
 If one of these turns out wrong, reproduce it with a synthetic fixture first, then
 fix the code, so the regression test exists without the real file.
