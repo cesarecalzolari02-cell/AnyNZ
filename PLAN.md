@@ -40,15 +40,32 @@ patches or signs anything.
   - [x] Owner: private GitHub repository created; `main` pushed with CI passing.
     The old local bundle remote is now called `bundle`.
 
+**Phase 5: updates and DLC** (the owner's full spec; 5a above covered items 1, 2
+and 4):
+
+- [x] 1. CNMT of every content set; Application, Patch, AddOnContent grouped by the
+  CNMT's ApplicationId; Delta and SystemUpdate listed only. (5a)
+- [x] 2. `titles PATH...`: base, latest update, DLC; warnings for DLC or updates
+  without their base and for several update versions. (5a)
+- [ ] 3. BKTR: bucket trees (relocation + subsection tables), AES-CTR-EX with the
+  subsection generations, indirect storage routing reads to base or patch, the
+  patched RomFS read as usual. `nca-extract --base FILE` / `--update FILE`
+  (highest version unless `--update-version`), and `--base` for `info`/`verify`.
+- [x] 4. DLC through the common-ticket path, extracted like any RomFS, listed in
+  `info`. (5a; personalized DLC tickets come with item 5)
+- [ ] 5. Personalized tickets via `eticket_rsa_keypair` (RSA-2048-OAEP), with a
+  clear message when it is missing.
+- [ ] 6. Synthetic base + patch pair with real BKTR tables, personalized tickets,
+  README / supported table / CHANGELOG, hygiene checks.
+
+`CLAUDE.md`'s scope section has to be updated by the owner to match items 3 and 5.
+
 Next (not started):
 
-- [ ] **Phase 5b: real-file validation.** Blocked until the owner has keys dumped
-  from their own console. Work through the checklist in `DEVELOPMENT.md`
-  ("Waiting for real files") with `scripts/smoke.py`; turn every surprise into a
-  synthetic regression test before fixing it.
-- [ ] **Later, owner's decision:** BKTR patch decryption (base + update RomFS) and
-  personalized tickets. Both are out of scope in `CLAUDE.md` today, which would
-  have to change first.
+- [ ] **Phase 6: real-file validation.** Blocked until the owner has keys dumped
+  from their own console and their own dumps. Work through the checklist in
+  `DEVELOPMENT.md` ("Waiting for real files") with `scripts/smoke.py`; turn every
+  surprise into a synthetic regression test before fixing it.
 
 Each phase ends with `ruff check`, `ruff format --check`, `pytest` and a commit.
 
