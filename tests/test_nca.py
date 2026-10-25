@@ -229,3 +229,19 @@ def test_truncated_nca() -> None:
         _ = open_nca(blob[:0x1000], keys).sections
     with pytest.raises(FormatError):
         open_nca(blob[:0x100], keys)
+
+
+@pytest.mark.parametrize("kind", ["pfs0", "romfs"])
+@pytest.mark.parametrize("value", [0, 0xFFFFFFFF, 64])
+def test_corrupt_hash_block_size_is_a_format_error(kind: str, value: int) -> None:
+    # FS header 0x28 is the HierarchicalSha256 block size, or IVFC level 0's log2 block size.
+    # A corrupt value must not turn into a huge shift or allocation.
+    keys = make_keys()
+    payload = exefs_payload()[0] if kind == "pfs0" else os.urandom(0x1000)
+    spec = SectionSpec(kind, payload, fs_bytes={0x28: value.to_bytes(4, "little")})
+    section = open_nca(build_nca(keys, [spec]), keys).sections[0]
+    if kind == "pfs0" and value == 64:
+        assert section.check_master_hash()  # a 64-byte block is unusual but plausible
+        return
+    with pytest.raises(FormatError, match="block size"):
+        section.check_master_hash()

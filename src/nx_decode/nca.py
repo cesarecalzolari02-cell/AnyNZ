@@ -41,13 +41,16 @@ from dataclasses import dataclass
 from functools import cached_property
 
 from .crypto import SECTOR, ctr_crypt, ecb_decrypt, xts_decrypt
-from .errors import FormatError, MissingKeyError, NxError, UnsupportedError
+from .errors import FormatError, MissingKeyError, MissingTicketError, NxError, UnsupportedError
 from .io import Storage, u16, u32, u64
 from .keys import Keyset
 from .ticket import Ticket
 
 HEADER_SIZE = 0xC00
 MEDIA_UNIT = 0x200
+# Hash block sizes outside this range are treated as corrupt. Real NCAs use 0x1000 to
+# 0x10000 (IVFC: 0x4000); the cap keeps a bad header from allocating huge buffers.
+MIN_HASH_BLOCK, MAX_HASH_BLOCK = 0x10, 0x1000000
 
 CONTENT_TYPES = {0: "Program", 1: "Meta", 2: "Control", 3: "Manual", 4: "Data", 5: "PublicData"}
 DISTRIBUTION = {0: "Download", 1: "GameCard"}
@@ -362,6 +365,8 @@ class Section:
             block, count = u32(info, 0x20), u32(info, 0x24)
             if not 1 <= count <= 5:
                 raise FormatError(f"section {self.index}: bad HierarchicalSha256 layer count")
+            if not MIN_HASH_BLOCK <= block <= MAX_HASH_BLOCK:
+                raise FormatError(f"section {self.index}: bad HierarchicalSha256 block size")
             layers = tuple(
                 (u64(info, 0x28 + 0x10 * i), u64(info, 0x30 + 0x10 * i), block)
                 for i in range(count)
@@ -375,12 +380,12 @@ class Section:
             n = u32(info, 0xC) - 1  # MaxLayers counts the master hash (per the references)
             if not 1 <= n <= 6:
                 raise FormatError(f"section {self.index}: bad IVFC level count")
+            log2s = [u32(info, 0x20 + 0x18 * i) for i in range(n)]
+            # min() first: shifting by a corrupt u32 would build a gigantic integer.
+            if not all(MIN_HASH_BLOCK <= 1 << min(b, 32) <= MAX_HASH_BLOCK for b in log2s):
+                raise FormatError(f"section {self.index}: bad IVFC block size")
             levels = tuple(
-                (
-                    u64(info, 0x10 + 0x18 * i),
-                    u64(info, 0x18 + 0x18 * i),
-                    1 << u32(info, 0x20 + 0x18 * i),
-                )
+                (u64(info, 0x10 + 0x18 * i), u64(info, 0x18 + 0x18 * i), 1 << log2s[i])
                 for i in range(n)
             )
             off, size, _ = levels[-1]
@@ -401,6 +406,8 @@ class Section:
             return st.sha256(off, size) == layout.master_hash
         if layout.kind == HASH_IVFC:
             off, size, block = layout.levels[0]
+            if size > block:  # one master hash covers exactly one level-0 block
+                return False
             data = st.read_at(off, size)
             return hashlib.sha256(data.ljust(block, b"\0")).digest() == layout.master_hash
         return True
@@ -449,7 +456,7 @@ class Nca:
             if h.has_rights_id:
                 ticket = self.tickets.get(h.rights_id)
                 if ticket is None:
-                    raise NxError(
+                    raise MissingTicketError(
                         f"NCA uses rights ID {h.rights_id.hex()} but no matching ticket was "
                         "found (pass --ticket, or use the NSP/XCI that contains it)"
                     )

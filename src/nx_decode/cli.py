@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -366,7 +367,19 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _tolerate_unencodable_output() -> None:
+    """Print names the console can't encode as ``?`` instead of crashing.
+
+    Redirected output on Windows uses the legacy code page (cp1252 and the like),
+    which has no Japanese or Chinese title names.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _tolerate_unencodable_output()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

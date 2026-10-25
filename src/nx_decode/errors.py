@@ -23,6 +23,10 @@ class KeysError(NxError):
     """The keys file is missing or could not be parsed."""
 
 
+class MissingTicketError(NxError):
+    """A rights-ID NCA was opened without its ticket: an input is missing, not corrupt."""
+
+
 class MissingKeyError(KeysError):
     """A key needed for this operation is not in the keys file.
 

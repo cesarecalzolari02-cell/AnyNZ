@@ -85,7 +85,8 @@ class Keyset:
     @classmethod
     def from_file(cls, path: str | os.PathLike[str]) -> Keyset:
         try:
-            text = Path(path).read_text(encoding="utf-8", errors="replace")
+            # utf-8-sig: Windows Notepad may save the file with a byte-order mark.
+            text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
         except OSError as e:
             raise KeysError(f"cannot read keys file {path}: {e.strerror}") from None
         return cls(parse_keys(text))

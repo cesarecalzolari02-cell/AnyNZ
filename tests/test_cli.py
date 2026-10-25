@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import os
+import sys
 
 import pytest
 from builders import (
@@ -215,3 +217,27 @@ def test_patch_nca_is_reported(tmp_path, capsys) -> None:
     )
     assert "needs the base game" in capsys.readouterr().out
     assert main(["info", "--keys", str(kf), str(tmp_path / "patch.nca")]) == 1
+
+
+def test_names_the_console_cannot_encode_do_not_crash(tmp_path, monkeypatch) -> None:
+    # Redirected output on Windows uses a legacy code page such as cp1252.
+    _, nsp, keys = game_nsp(tmp_path, name="ゼルダ Test")
+    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", out)
+    assert main(["info", "--keys", str(keys), str(nsp)]) == 0
+    out.flush()
+    assert b"Name:     ??? Test" in out.buffer.getvalue()
+    assert main(["titles", "--keys", str(keys), str(nsp)]) == 0
+
+
+def test_verify_rights_id_nca_without_ticket_skips_not_fails(tmp_path, capsys) -> None:
+    game, _, keys = game_nsp(tmp_path, rights_id=True)
+    nca, tik = tmp_path / "p.nca", tmp_path / "t.tik"
+    nca.write_bytes(game.files[0][1])
+    tik.write_bytes(game.files[3][1])
+    assert main(["verify", "--keys", str(keys), str(nca)]) == 0
+    out = capsys.readouterr().out
+    assert "FAIL" not in out and "no matching ticket" in out and "2 skipped" not in out
+    assert main(["verify", "--keys", str(keys), str(nca), "--ticket", str(tik)]) == 0
+    out = capsys.readouterr().out
+    assert "OK   p.nca: section 1 (RomFS) hash tables" in out

@@ -110,3 +110,14 @@ def test_wrong_length_key() -> None:
     ks = Keyset({"header_key": rand_key(16)})
     with pytest.raises(KeysError, match="wrong length"):
         ks.header_key()
+
+
+def test_keys_file_with_bom_and_crlf(tmp_path) -> None:
+    # Windows Notepad may save a UTF-8 byte-order mark and CRLF line endings.
+    k1, k2 = rand_key(32), rand_key()
+    path = tmp_path / "prod.keys"
+    path.write_bytes(
+        b"\xef\xbb\xbf" + f"header_key = {k1.hex()}\r\ntitlekek_00 = {k2.hex()}\r\n".encode()
+    )
+    keyset = Keyset.from_file(path)
+    assert keyset.header_key() == k1 and keyset.titlekek(0) == k2

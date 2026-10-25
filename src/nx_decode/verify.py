@@ -26,7 +26,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from .containers import Container, ContainerFile, PartitionFS
-from .errors import MissingKeyError, NxError, UnsupportedError
+from .errors import MissingKeyError, MissingTicketError, NxError, UnsupportedError
 from .io import CHUNK, Storage
 from .keys import Keyset
 from .meta import ContentRecord
@@ -47,36 +47,46 @@ class Check:
 def _hfs0_checks(name: str, pfs: PartitionFS) -> Iterator[Check]:
     for e in pfs.entries:
         n = min(e.hashed_size, e.size)
-        ok = hashlib.sha256(pfs.open(e).read_at(0, n)).digest() == e.hash
-        yield Check(f"{name}/{e.name}", "HFS0 entry hash", ok)
+        yield Check(f"{name}/{e.name}", "HFS0 entry hash", pfs.open(e).sha256(0, n) == e.hash)
 
 
 def xci_checks(c: Container) -> Iterator[Check]:
     assert c.xci_header is not None and c.root is not None
     h = c.xci_header
-    root = c.root.storage.read_at(0, h.root_header_size)
-    yield Check("XCI", "root HFS0 header hash", hashlib.sha256(root).digest() == h.root_header_hash)
+    if h.root_header_size > c.root.storage.size:
+        yield Check(
+            "XCI", "root HFS0 header hash", False, "header size is past the end of the file"
+        )
+    else:
+        ok = c.root.storage.sha256(0, h.root_header_size) == h.root_header_hash
+        yield Check("XCI", "root HFS0 header hash", ok)
     yield from _hfs0_checks("root", c.root)
     for name, part in c.partitions.items():
         yield from _hfs0_checks(name, part)
 
 
-def _hash_blocks(st: Storage, off: int, size: int, block: int, table: bytes, pad: bool) -> bool:
-    """Hash ``size`` bytes at ``off`` in ``block``-sized pieces against ``table``."""
-    if block <= 0 or len(table) < 32 * (-(-size // block)):
+def _hash_blocks(
+    st: Storage, off: int, size: int, block: int, table_off: int, table_size: int, pad: bool
+) -> bool:
+    """Hash ``size`` bytes at ``off`` in ``block``-sized pieces against the table at
+    ``table_off``. Data and table are both read a chunk at a time."""
+    blocks = -(-size // block)
+    if table_size < 32 * blocks:
         return False
     step = max(block, CHUNK // block * block)
     idx = 0
     pos = 0
     while pos < size:
         chunk = st.read_at(off + pos, min(step, size - pos))
-        for i in range(0, len(chunk), block):
-            piece = chunk[i : i + block]
+        n = -(-len(chunk) // block)
+        table = st.read_at(table_off + idx * 32, n * 32)
+        for i in range(n):
+            piece = chunk[i * block : (i + 1) * block]
             if pad:
                 piece = piece.ljust(block, b"\0")
-            if hashlib.sha256(piece).digest() != table[idx * 32 : idx * 32 + 32]:
+            if hashlib.sha256(piece).digest() != table[i * 32 : i * 32 + 32]:
                 return False
-            idx += 1
+        idx += n
         pos += len(chunk)
     return True
 
@@ -89,8 +99,7 @@ def section_hash_tables_ok(section: Section) -> bool:
     for i in range(1, len(levels)):
         h_off, h_size, _ = levels[i - 1]
         d_off, d_size, block = levels[i]
-        table = st.read_at(h_off, h_size)
-        if not _hash_blocks(st, d_off, d_size, block, table, pad=layout.kind == HASH_IVFC):
+        if not _hash_blocks(st, d_off, d_size, block, h_off, h_size, pad=layout.kind == HASH_IVFC):
             return False
     return True
 
@@ -114,7 +123,7 @@ def nca_checks(nca: Nca, subject: str, quick: bool) -> Iterator[Check]:
                 yield Check(subject, f"{what} hash tables", None, "skipped (--quick)")
             elif s.hash_layout.kind in (HASH_SHA256, HASH_IVFC):
                 yield Check(subject, f"{what} hash tables", section_hash_tables_ok(s))
-        except (MissingKeyError, UnsupportedError) as e:
+        except (MissingKeyError, MissingTicketError, UnsupportedError) as e:
             yield Check(subject, what, None, str(e))
         except NxError as e:
             yield Check(subject, what, False, str(e))

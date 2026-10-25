@@ -465,8 +465,13 @@ def build_game(
     key_generation: int = 3,
     rights_id: bool = False,
     personalized: bool = False,
+    name: str = "Test Game",
+    plaintext: bool = False,
 ) -> FakeGame:
-    """A minimal application: Program (ExeFS + RomFS), Control (NACP) and Meta NCAs."""
+    """A minimal application: Program (ExeFS + RomFS), Control (NACP) and Meta NCAs.
+
+    ``plaintext`` leaves every NCA unencrypted, so corruption tests reach the parsers.
+    """
     rev = max(key_generation - 1, 0)
     keys = make_keys(revisions=(rev,))
     title_key = rand_key() if rights_id else None
@@ -476,6 +481,7 @@ def build_game(
         "title_id": title_id,
         "rights_id": rid,
         "title_key": title_key,
+        "plaintext": plaintext,
     }
 
     exefs = [("main", os.urandom(0x1800)), ("main.npdm", os.urandom(0x200)), ("rtld", b"r" * 99)]
@@ -489,13 +495,15 @@ def build_game(
         content_type=0,
         **kw,
     )
-    nacp = build_nacp("Test Game", "Test Publisher", "1.2.3")
+    nacp = build_nacp(name, "Test Publisher", "1.2.3")
     control = build_nca(
         keys, [SectionSpec("romfs", build_romfs({"control.nacp": nacp}))], content_type=2, **kw
     )
     contents = [(program, 1), (control, 3)]
     ext = cnmt_ext(0x80, patch_id=title_id + 0x800)
-    meta = build_meta_nca(keys, title_id, 0, 0x80, contents, ext, key_generation)
+    meta = build_meta_nca(
+        keys, title_id, 0, 0x80, contents, ext, key_generation, plaintext=plaintext
+    )
     files = [
         (nca_name(program), program),
         (nca_name(control), control),
@@ -505,7 +513,7 @@ def build_game(
         assert rid is not None and title_key is not None
         tik = build_ticket(rid, encrypt_title_key(keys, rev, title_key), personalized=personalized)
         files += ticket_files(rid, tik)
-    return FakeGame(keys, files, title_id, "Test Game", "Test Publisher", tree, exefs)
+    return FakeGame(keys, files, title_id, name, "Test Publisher", tree, exefs)
 
 
 META_NAMES = {0x80: "Application", 0x81: "Patch", 0x82: "AddOnContent", 0x83: "Delta"}
@@ -520,6 +528,7 @@ def build_meta_nca(
     ext: bytes,
     key_generation: int,
     meta_infos: list[tuple[int, int, int]] | None = None,
+    plaintext: bool = False,
 ) -> bytes:
     """A Meta NCA whose PFS0 holds ``<Type>_<title id>.cnmt``."""
     cnmt = build_cnmt(title_id, version, meta_type, contents, ext=ext, meta_infos=meta_infos)
@@ -530,6 +539,7 @@ def build_meta_nca(
         content_type=1,
         key_generation=key_generation,
         title_id=title_id,
+        plaintext=plaintext,
     )
 
 
