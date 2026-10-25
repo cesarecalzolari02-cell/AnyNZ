@@ -30,7 +30,8 @@ type, 0x4 encryption type, 0x5 metadata hash type, 0x8 hash info, 0x100 patch in
 0x140 generation, 0x144 secure value, 0x148 sparse info, 0x178 compression info,
 0x1A0 metadata hash info. The 14.0.0+ fields (SHA3 hash types, skip-layer-hash
 encryption types, metadata hash info), sparse and compressed sections are only
-detected, so they can be reported as unsupported.
+detected, so they can be reported as unsupported. An update's BKTR (AES-CTR-EX)
+section is read through :mod:`nx_decode.bktr` when the NCA has a ``base``.
 """
 
 from __future__ import annotations

@@ -47,15 +47,15 @@ and 4):
   CNMT's ApplicationId; Delta and SystemUpdate listed only. (5a)
 - [x] 2. `titles PATH...`: base, latest update, DLC; warnings for DLC or updates
   without their base and for several update versions. (5a)
-- [ ] 3. BKTR: bucket trees (relocation + subsection tables), AES-CTR-EX with the
+- [x] 3. BKTR: bucket trees (relocation + subsection tables), AES-CTR-EX with the
   subsection generations, indirect storage routing reads to base or patch, the
   patched RomFS read as usual. `nca-extract --base FILE` / `--update FILE`
   (highest version unless `--update-version`), and `--base` for `info`/`verify`.
 - [x] 4. DLC through the common-ticket path, extracted like any RomFS, listed in
   `info`. (5a; personalized DLC tickets come with item 5)
-- [ ] 5. Personalized tickets via `eticket_rsa_keypair` (RSA-2048-OAEP), with a
+- [x] 5. Personalized tickets via `eticket_rsa_keypair` (RSA-2048-OAEP), with a
   clear message when it is missing.
-- [ ] 6. Synthetic base + patch pair with real BKTR tables, personalized tickets,
+- [x] 6. Synthetic base + patch pair with real BKTR tables, personalized tickets,
   README / supported table / CHANGELOG, hygiene checks.
 
 `CLAUDE.md`'s scope section has to be updated by the owner to match items 3 and 5.

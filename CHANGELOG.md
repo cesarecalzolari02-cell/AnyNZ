@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Updates and personalized tickets (Phase 5)
+
+- Updates are applied to their base game. An update's BKTR section is decoded
+  from its relocation and subsection bucket trees: AES-CTR-EX with each
+  subsection's generation, and an indirect storage that reads every range from
+  the base game or the patch data. The patched RomFS then reads like any other.
+- `nca-extract UPDATE --base BASE`, or `nca-extract BASE --update UPD...` (highest
+  version, or `--update-version N`): the updated title, i.e. the update's NCAs
+  with patched RomFS plus the base contents it keeps. `info` and `verify` take
+  `--base` too; `verify --base` checks the patched RomFS against the update's
+  hash tree.
+- Update and base NCAs are paired by content type and ID offset (CNMT 0x37), and
+  the update's ApplicationId must match the base game.
+- Personalized tickets decrypt with `eticket_rsa_keypair` from your keys file
+  (RSA-2048-OAEP, SHA-256). Missing, another console's or malformed keypairs are
+  reported clearly; verify skips such NCAs instead of failing them.
+- `scripts/smoke.py --base` and the demo apply an update. New synthetic fixtures:
+  real BKTR sections (relocations into the base, several generations, an
+  unencrypted subsection, multi-node tables), personalized games and DLC with a
+  runtime RSA-2048 "console", and corrupted update/base pairs in the robustness
+  test.
+
 ### Packaging and CI
 
 - SPDX license metadata (`license = "MIT"`, `license-files`); builds need

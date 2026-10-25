@@ -7,7 +7,7 @@ import sys
 import tracemalloc
 from pathlib import Path
 
-from builders import build_game, build_pfs0, write_keys_file
+from builders import build_game, build_patch, build_pfs0, write_keys_file
 
 from nx_decode.cli import main
 
@@ -50,3 +50,30 @@ def test_smoke_script_prints_only(tmp_path) -> None:
     assert set(tmp_path.iterdir()) == before
     for value in game.keys.values():
         assert value.hex() not in (run.stdout + run.stderr).lower()
+
+
+def test_smoke_script_applies_an_update(tmp_path) -> None:
+    game = build_game()
+    patch = build_patch(game.keys, game.title_id, base=game)
+    base, update = tmp_path / "base.nsp", tmp_path / "update.nsp"
+    base.write_bytes(build_pfs0(game.files))
+    update.write_bytes(build_pfs0(patch.files))
+    keys = write_keys_file(tmp_path / "k.keys", game.keys)
+    script = Path(__file__).resolve().parent.parent / "scripts" / "smoke.py"
+    run = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            str(keys),
+            str(update),
+            "--base",
+            str(base),
+            "--full",
+            "--extract",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "Base game: base.nsp" in run.stdout and "needs the base game" not in run.stdout
+    assert "1 title(s), 1 with updates" in run.stdout

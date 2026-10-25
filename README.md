@@ -11,8 +11,9 @@ a file, checks its integrity and extracts its contents.
 > **Bring your own keys and files.** nx-decode does not include, download or
 > distribute keys, firmware, title keys or games, and never will. You supply
 > your own `prod.keys` (dumped from your own console) and your own game dumps.
-> It does not patch, sign, re-encrypt or bypass anything. Personalized
-> (console-bound) tickets are deliberately not supported.
+> It does not modify, sign, re-encrypt or bypass anything. Updates are applied
+> only to a base game you supply, and personalized (console-bound) tickets only
+> decrypt with the `eticket_rsa_keypair` from your own console's keys.
 
 ### Install
 
@@ -43,6 +44,11 @@ Pre-derived keys (`header_key`, `key_area_key_{application,ocean,system}_XX`,
 `aes_key_generation_source`, `key_area_key_*_source`, `titlekek_source`,
 `header_kek_source`, `header_key_source`).
 
+Personalized tickets (eShop purchases dumped from your console) also need
+`eticket_rsa_keypair`, the console-unique eTicket RSA key that Lockpick_RCM
+writes into `prod.keys`. Without it, nx-decode says it is missing; with another
+console's key, it says the ticket belongs to another console.
+
 Error messages name missing keys (for example `missing key:
 key_area_key_application_10 (... key generation 17; your keys may be older than
 this title)`) but never print key values.
@@ -57,12 +63,17 @@ nx-decode extract game.xci -o out/ --partition secure
 nx-decode nca-extract game.nsp -o out/     # decrypt every NCA: ExeFS, PFS0, RomFS trees
 nx-decode nca-extract game.nsp -o out/ --nca 0123...cdef.nca --section 1
 nx-decode nca-extract program.nca -o out/ --ticket 0100...0b.tik
+nx-decode nca-extract update.nsp --base game.xci -o out/            # update applied to its base
+nx-decode nca-extract game.xci --update v1.nsp --update v2.nsp -o out/  # highest version applied
+nx-decode nca-extract game.xci --update v1.nsp --update v2.nsp --update-version 65536 -o out/
 nx-decode verify  game.nsp                 # content IDs, CNMT hashes, hash tables
 nx-decode verify  game.xci --quick         # header-level checks only (fast)
+nx-decode verify  update.nsp --base game.xci  # also checks the patched RomFS hash tree
 nx-decode titles  games/ updates/ dlc.nsp  # group files into base + latest update + DLC
 ```
 
-`info`, `verify`, `list` (for an `.nca`), `nca-extract` and `titles` accept `--keys PATH`.
+`info`, `verify`, `list` (for an `.nca`), `nca-extract` and `titles` accept `--keys PATH`;
+`info`, `verify` and `nca-extract` accept `--base FILE` when FILE is an update.
 Exit status is 0 on success and 1 if something failed or could not be decoded
 (each problem is reported on its own line). `--debug` shows tracebacks for
 unexpected errors.
@@ -71,6 +82,16 @@ unexpected errors.
 `section<N>_pfs0/` (other PFS0 sections, such as the CNMT or logo) and
 `section<N>_romfs/` (the RomFS directory tree). DLC data NCAs extract like any
 other RomFS section.
+
+An update's RomFS is not a whole RomFS: its BKTR section holds only what changed,
+plus tables that say which ranges come from the base game. With `--base BASE`
+(FILE is the update) or `--update UPDATE` (FILE is the base game; repeat it for
+several updates, the highest version is used unless `--update-version N`),
+`nca-extract` writes the updated title: the update's NCAs with their RomFS
+patched from the base game, and the base game's contents the update does not
+replace (such as a manual). The update's ExeFS is a plain section and extracts as
+is. NCAs are paired by content type and ID offset from the two CNMTs, and the
+update's CNMT must name the base game as its application.
 
 `titles` takes any mix of files and folders (searched recursively for
 `.xci`/`.nsp`/`.nca`), reads every content set's CNMT and groups them by the
@@ -91,28 +112,29 @@ into memory.
 | Containers | XCI (with or without the 0x1000-byte key-area prefix), NSP, standalone NCA |
 | Partition FS | PFS0, HFS0 (incl. XCI update / normal / secure / logo partitions) |
 | NCA headers | NCA3, NCA2, already-decrypted (plaintext) headers |
-| NCA keys | key generations 0x00 to 0x1F, application/ocean/system key-area keys, rights-ID NCAs via **common** tickets |
-| Section crypto | none, AES-CTR, AES-XTS |
+| NCA keys | key generations 0x00 to 0x1F, application/ocean/system key-area keys, rights-ID NCAs via common tickets, and personalized tickets with your `eticket_rsa_keypair` (RSA-2048-OAEP) |
+| Section crypto | none, AES-CTR, AES-XTS, AES-CTR-EX (update BKTR sections, with the base game) |
 | Hash layers | HierarchicalSha256 (PFS0), HierarchicalIntegrity / IVFC (RomFS) |
 | Metadata | CNMT (title ID, version, type, content records, ApplicationId / PatchId from the extended header, system-update content meta records), NACP (name, publisher, display version) |
 | Content meta types | Application, Patch and AddOnContent are grouped into titles; Delta, DataPatch and SystemUpdate are listed only |
-| DLC (AddOnContent) | `info`, `verify` and `nca-extract` via common tickets, like any RomFS |
-| Updates (Patch) | listed and grouped by `titles` and `info`; their BKTR sections are **not** decrypted (see below) |
-| Verify | content ID = SHA-256[:16], CNMT hash and size, FS-header hashes, master hashes, full hash tables, XCI root/partition HFS0 hashes |
+| DLC (AddOnContent) | `info`, `verify` and `nca-extract` via common or personalized tickets, like any RomFS |
+| Updates (Patch) | grouped by `titles`; BKTR sections (relocation and subsection bucket trees, AES-CTR-EX, indirect storage) decoded against the base game with `--base` / `--update` in `info`, `verify` and `nca-extract` |
+| Verify | content ID = SHA-256[:16], CNMT hash and size, FS-header hashes, master hashes, full hash tables (for an update with `--base`, over the patched RomFS), XCI root/partition HFS0 hashes |
 
 ### Not supported (reported clearly, never a crash)
 
 | Feature | What you get |
 | --- | --- |
-| Update / patch NCA decryption (BKTR, AesCtrEx, indirect storage) | "BKTR patch section: needs the base game, not supported" (updates are still grouped by `titles`) |
-| Personalized tickets | "personalized ticket: only common tickets are supported" |
+| An update's BKTR section without its base game | "BKTR patch section: needs the base game (pass --base)" (the ExeFS and Control NCA still decode) |
+| Personalized tickets without `eticket_rsa_keypair` | `missing key: eticket_rsa_keypair (needed for personalized tickets ...)` |
+| BKTR with skip-layer-hash encryption (14.0.0+), BKTR tables needing a second index level (over ~1.6 million relocation entries) | "... not supported" |
 | Keys for a newer key generation than your keys file has | `missing key: ...` naming the key and the key generation |
 | NSZ / XCZ / NCZ (compressed) | "compressed; decompress first" |
 | NCA0, sparse sections, compressed sections, metadata hash layers, SHA3 hash layers, skip-layer-hash encryption, unknown types | "... not supported" |
 | Header / NPDM RSA signature checks, XCI header decryption | not implemented |
 
-Out of scope: downloading anything, hosting or distributing keys, patching,
-signing, re-packing, or bypassing online checks.
+Out of scope: downloading anything (keys, games, updates), hosting or distributing
+keys, modifying, signing or re-packing games, or bypassing online checks.
 
 ### Specification sources
 
@@ -144,6 +166,29 @@ alone:
   records; the wiki lists the structures but does not say how they are laid out);
 - the title-ID convention (update = base + 0x800, DLC = base + 0x1000 + n), which
   `titles` only uses when a CNMT has no ApplicationId.
+
+BKTR (updates) and personalized tickets were checked against Switchbrew's
+[NCA](https://switchbrew.org/wiki/NCA#PatchInfo) and
+[Ticket](https://switchbrew.org/wiki/Ticket) pages and the read-only reference
+implementations hactool (ISC) and nxdumptool (GPL-3.0). LibHac and Lockpick_RCM
+were no longer reachable.
+
+- **Confirmed by Switchbrew and both references:** PatchInfo offsets, the
+  BucketTreeHeader, the relocation and subsection table and entry layouts.
+- **Both references agree, Switchbrew is silent:** the AES-CTR-EX counter
+  (SecureValue, then the subsection's generation, then offset >> 4), both tables
+  read with the section's normal counter (Switchbrew only says "normal crypto"),
+  and a relocation entry ending where the next one starts.
+- **nxdumptool only:** the subsection "encryption" byte at 0x8 (0 = encrypted,
+  1 = not; Switchbrew calls it unused), the entry-node capacities, pairing base
+  and update NCAs by content type and ID offset, and that a personalized title
+  key block is RSA-2048-OAEP with SHA-256 and an empty label, which unwraps to
+  the same titlekek-wrapped key a common ticket holds. Switchbrew only says
+  "RSA-2048".
+- **Not confirmed by any source reached:** the exact `eticket_rsa_keypair` layout
+  in a Lockpick_RCM keys file. nx-decode reads D, N and E at 0, 0x100 and 0x200
+  (nxdumptool's field order without the CTR) and checks the keypair works before
+  using it, so a different layout is a clear error, never a wrong key.
 
 The three details that were previously unconfirmed:
 

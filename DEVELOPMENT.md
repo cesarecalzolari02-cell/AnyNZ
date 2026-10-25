@@ -49,11 +49,13 @@ up next to the code (the forbidden-file check would reject them anyway).
 | `keys.py` | parse a `prod.keys`, derive missing keys; never formats key values |
 | `containers.py` | PFS0, HFS0, XCI, NSP; NSZ/XCZ/NCZ detection |
 | `nca.py` | NCA header decryption, key selection, sections, hash layouts, "unsupported" reasons |
-| `ticket.py` | common tickets (title key unwrapping input) |
+| `bktr.py` | update (BKTR) sections: bucket trees, AES-CTR-EX storage, indirect storage |
+| `ticket.py` | tickets (title key block, common or personalized) |
 | `romfs.py` | RomFS walk / extract |
 | `meta.py` | CNMT (incl. extended headers) and NACP |
 | `title.py` | `inspect()`: one container -> NCAs, tickets, CNMTs, NACPs |
 | `library.py` | `scan()`: many files -> titles (base, updates, DLC) and warnings |
+| `update.py` | pair an update with its base game; choose among several updates |
 | `verify.py` | hash and content-ID checks |
 | `cli.py` | the `nx-decode` commands |
 
@@ -67,8 +69,9 @@ implementation of the format.
   the Switchbrew wiki, and `Reference:` for what relies on hactool / libnintendo
   only. When you check something new against the wiki, move it from one to the
   other and update the README's "Specification sources".
-- **Unsupported, not crashed.** Anything the tool can't decode (BKTR, personalized
-  tickets, SHA3 layers, compressed files, unknown key generations) gets a clear
+- **Unsupported, not crashed.** Anything the tool can't decode (an update without
+  its base, a personalized ticket without `eticket_rsa_keypair`, SHA3 layers,
+  compressed files, unknown key generations) gets a clear
   reason via `Section.unsupported_reason()` or an `UnsupportedError`. Corrupt
   input raises a `FormatError`; `tests/test_robustness.py` runs corrupted
   synthetic files through every command and fails on anything that escapes as
@@ -124,7 +127,15 @@ the terminal only) and check:
 8. **NACP languages 16/17** (Polish, Thai on 21.0.0+): where they live is unclear.
 9. **`titles` speed** on a large XCI (it reads only headers, top-level hashes and
    the small CNMT/NACP files).
-10. **Extraction on Windows:** RomFS paths longer than 260 characters (they need
+10. **BKTR on a real update:** `smoke.py KEYS update.nsp --base game.xci --full`.
+    `verify --base` hashes the whole patched RomFS against the update's own IVFC
+    tree, so a pass confirms the counter, both table readings and the relocation
+    logic at once. Also watch for subsection entries with the "not encrypted"
+    flag, multi-program titles (ID offsets), and updates bundled on a game card.
+11. **Personalized tickets:** whether Lockpick_RCM's `eticket_rsa_keypair` really is
+    D | N | E | ... (nx-decode refuses anything else as "not a usable keypair"),
+    and that a personalized eShop dump of yours decrypts.
+12. **Extraction on Windows:** RomFS paths longer than 260 characters (they need
     long paths enabled in Windows) and file names with characters Windows forbids
     (`<>:"|?*`). Today a path Windows can't create stops `nca-extract` with an OS
     error, and a `:` skips the whole section.
